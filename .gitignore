@@ -1,0 +1,31 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+
+# ---- Env / secrets ----
+.env
+.env.*
+!example.env
+
+# ---- OS ----
+.DS_Store
+
+# ---- Project artifacts ----
+out/
+wandb/
+*.pt
+*.bin
+*.safetensors
+
+# Generated piratized dataset — recreate with `make data`
+dataset/tiny_stories_pirate/
+
+# Tokenizer is small + worth versioning — keep it.
+!pirate_bpe.json
+
+# ---- IDE ----
+.idea/
+.vscode/

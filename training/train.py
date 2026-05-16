@@ -1,0 +1,288 @@
+import math
+import os
+import time
+from contextlib import nullcontext
+from typing import Optional
+
+import torch
+from dotenv import load_dotenv
+from torch.amp import GradScaler, autocast
+
+from training.config import Config
+from training.data import get_batch
+from training.model import GPT
+
+load_dotenv()
+
+
+def setup_training(config: Config):
+    """Set seeds, prepare output dir, return autocast context + grad scaler."""
+    torch.manual_seed(config.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config.seed)
+    os.makedirs(config.out_dir, exist_ok=True)
+
+    ptdtype = {
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+    }[config.dtype]
+
+    if config.device == "cuda" and config.dtype != "float32":
+        ctx = autocast(device_type="cuda", dtype=ptdtype)
+    else:
+        ctx = nullcontext()
+
+    scaler = GradScaler(enabled=(config.dtype == "float16"))
+    return ctx, scaler
+
+
+def build_optimizer(model: GPT, config: Config) -> torch.optim.AdamW:
+    decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
+    no_decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]
+
+    optim_groups = [
+        {"params": decay_params, "weight_decay": config.weight_decay},
+        {"params": no_decay_params, "weight_decay": 0.0},
+    ]
+
+    optimizer = torch.optim.AdamW(
+        optim_groups,
+        lr=config.learning_rate,
+        betas=(config.beta1, config.beta2),
+    )
+
+    n_decay = sum(p.numel() for p in decay_params)
+    n_no_decay = sum(p.numel() for p in no_decay_params)
+    print(
+        f"Optimizer: AdamW, lr={config.learning_rate}, "
+        f"betas=({config.beta1}, {config.beta2})"
+    )
+    print(f"  Decayed params:    {n_decay:,} ({len(decay_params)} tensors)")
+    print(f"  No-decay params:   {n_no_decay:,} ({len(no_decay_params)} tensors)")
+
+    return optimizer
+
+
+def get_lr(it: int, config: Config) -> float:
+    """
+    Warmup + cosine decay learning rate schedule (Lesson 4).
+
+    Phase 1 (0 → warmup_iters):           linear ramp from 0 to learning_rate
+    Phase 2 (warmup → lr_decay_iters):    cosine decay from learning_rate to min_lr
+    Phase 3 (after lr_decay_iters):       hold at min_lr forever
+    """
+    if it < config.warmup_iters:
+        return config.learning_rate * (it + 1) / (config.warmup_iters + 1)
+    if it > config.lr_decay_iters:
+        return config.min_lr
+    decay_ratio = (it - config.warmup_iters) / (
+        config.lr_decay_iters - config.warmup_iters
+    )
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return config.min_lr + coeff * (config.learning_rate - config.min_lr)
+
+
+@torch.no_grad()
+def estimate_loss(model: GPT, config: Config, ctx) -> dict[str, float]:
+    """Average loss over several batches of train and val data."""
+    out = {}
+    model.eval()
+    for split in ["train", "val"]:
+        losses = torch.zeros(config.eval_iters)
+        for k in range(config.eval_iters):
+            x, y = get_batch(split, config)
+            with ctx:
+                _, loss = model(x, y)
+            losses[k] = loss.item()
+        out[split] = losses.mean().item()
+    model.train()
+    return out
+
+
+def try_resume(config: Config) -> Optional[dict]:
+    """Local ckpt wins (same-machine crash); else pull from HF Hub if configured."""
+    local_path = os.path.join(config.out_dir, "ckpt.pt")
+
+    if os.path.exists(local_path):
+        print(f"Resuming from local checkpoint: {local_path}")
+        return torch.load(local_path, map_location=config.device, weights_only=False)
+
+    if not (config.resume and config.hf_repo_id):
+        return None
+
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(
+            repo_id=config.hf_repo_id,
+            filename="ckpt.pt",
+            token=os.environ.get("HF_TOKEN"),
+            local_dir=config.out_dir,
+        )
+        print(f"Resuming from Hub checkpoint: {config.hf_repo_id}")
+        return torch.load(path, map_location=config.device, weights_only=False)
+    except Exception as e:
+        print(f"No Hub checkpoint to resume from ({type(e).__name__}: {e})")
+        return None
+
+
+def ensure_hub_repo(config: Config):
+    if not config.hf_repo_id:
+        return
+    from huggingface_hub import HfApi
+    HfApi().create_repo(
+        repo_id=config.hf_repo_id,
+        private=config.hf_private,
+        exist_ok=True,
+        token=os.environ.get("HF_TOKEN"),
+    )
+
+
+def maybe_init_wandb(config: Config):
+    if not config.wandb_project:
+        return None
+    import wandb
+    return wandb.init(
+        project=config.wandb_project,
+        entity=config.wandb_entity,
+        name=config.run_name,
+        config=vars(config),
+    )
+
+
+def save_checkpoint(
+    model: GPT,
+    optimizer: torch.optim.Optimizer,
+    config: Config,
+    iter_num: int,
+    val_loss: float,
+    best_val_loss: float,
+    tag: str = "latest",
+):
+    """Save locally and (best-effort) push to HF Hub."""
+    raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+
+    checkpoint = {
+        "model": raw_model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "config": config,
+        "iter_num": iter_num,
+        "val_loss": val_loss,
+        "best_val_loss": best_val_loss,
+    }
+    path = os.path.join(config.out_dir, "ckpt.pt")
+    torch.save(checkpoint, path)
+    print(f"  → saved checkpoint to {path} ({tag}, val {val_loss:.4f})")
+
+    if config.hf_repo_id:
+        try:
+            from huggingface_hub import HfApi
+            HfApi().upload_file(
+                path_or_fileobj=path,
+                path_in_repo="ckpt.pt",
+                repo_id=config.hf_repo_id,
+                token=os.environ.get("HF_TOKEN"),
+                commit_message=f"iter {iter_num} | val {val_loss:.4f} ({tag})",
+            )
+            print(f"  → pushed to {config.hf_repo_id}")
+        except Exception as e:
+            print(f"  ! Hub upload failed ({type(e).__name__}: {e}) — continuing")
+
+
+def train(config: Config):
+    """Main training loop."""
+    print(f"\n=== Training run: {config.run_name} ===")
+    print(f"Device: {config.device}, dtype: {config.dtype}, compile: {config.compile}")
+
+    ctx, scaler = setup_training(config)
+    ensure_hub_repo(config)
+    wandb_run = maybe_init_wandb(config)
+
+    model = GPT(config).to(config.device)
+    print(f"Model: {model.num_parameters() / 1e6:.2f}M parameters")
+
+    if config.compile:
+        print("Compiling model with torch.compile...")
+        model = torch.compile(model)
+
+    optimizer = build_optimizer(model, config)
+
+    iter_num = 0
+    best_val_loss = float("inf")
+
+    ckpt = try_resume(config)
+    if ckpt is not None:
+        raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+        raw_model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        iter_num = ckpt["iter_num"] + 1
+        best_val_loss = ckpt.get("best_val_loss", ckpt.get("val_loss", float("inf")))
+        print(f"Resumed at iter {iter_num}, best_val_loss={best_val_loss:.4f}")
+
+    t0 = time.time()
+
+    while iter_num < config.max_iters:
+        lr = get_lr(iter_num, config)
+        for pg in optimizer.param_groups:
+            pg["lr"] = lr
+
+        if iter_num % config.eval_interval == 0:
+            losses = estimate_loss(model, config, ctx)
+            elapsed = time.time() - t0
+            print(
+                f"step {iter_num:>6d} | "
+                f"train {losses['train']:.4f} | val {losses['val']:.4f} | "
+                f"lr {lr:.2e} | {elapsed:.1f}s"
+            )
+            if wandb_run is not None:
+                wandb_run.log(
+                    {
+                        "train/loss": losses["train"],
+                        "val/loss": losses["val"],
+                        "lr": lr,
+                        "elapsed_s": elapsed,
+                    },
+                    step=iter_num,
+                )
+
+            is_best = losses["val"] < best_val_loss
+            if is_best:
+                best_val_loss = losses["val"]
+            # Always save so a crash never loses more than eval_interval iters.
+            save_checkpoint(
+                model, optimizer, config, iter_num, losses["val"],
+                best_val_loss, tag="best" if is_best else "latest",
+            )
+
+        x, y = get_batch("train", config)
+        with ctx:
+            _, loss = model(x, y)
+
+        optimizer.zero_grad(set_to_none=True)
+        scaler.scale(loss).backward()
+
+        if config.grad_clip > 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+
+        scaler.step(optimizer)
+        scaler.update()
+
+        if iter_num % config.log_interval == 0 and iter_num > 0:
+            print(f"  iter {iter_num} | minibatch loss {loss.item():.4f} | lr {lr:.2e}")
+            if wandb_run is not None:
+                wandb_run.log(
+                    {"train/minibatch_loss": loss.item(), "lr": lr},
+                    step=iter_num,
+                )
+
+        iter_num += 1
+
+    print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
+    if wandb_run is not None:
+        wandb_run.finish()
+
+
+if __name__ == "__main__":
+    config = Config.for_m1_smoke_test()
+    train(config)
