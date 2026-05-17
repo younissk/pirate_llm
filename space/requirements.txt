@@ -1,0 +1,4 @@
+torch
+safetensors
+tokenizers
+huggingface_hub
