@@ -1,4 +1,4 @@
-from datasets import DatasetDict, load_dataset, load_from_disk
+from datasets import DatasetDict, load_dataset
 
 from dataset.piratize import piratize
 

@@ -1,4 +1,4 @@
-.PHONY: help install env data tokenizer tokens dataset train train-gpu sample clean clean-data clean-ckpt
+.PHONY: help install env data tokenizer tokens dataset train train-gpu sft-gpu sample clean clean-data clean-ckpt
 
 UV ?= uv
 PROMPT ?= Once upon a time
@@ -16,6 +16,7 @@ help:
 	@echo ""
 	@echo "  make train         M1 smoke test (CPU/MPS, ~50 iters)"
 	@echo "  make train-gpu     Full GPU run (CUDA, bf16, W&B + HF Hub sync)"
+	@echo "  make sft-gpu       SFT on dolly-15k-pirate-speech (CUDA, loads pretrained ckpt from HF)"
 	@echo ""
 	@echo "  make sample PROMPT='Ahoy'   Generate from out/ckpt.pt"
 	@echo ""
@@ -59,6 +60,9 @@ train: train.bin val.bin
 
 train-gpu: train.bin val.bin
 	$(UV) run python -c "from training.config import Config; from training.train import train; train(Config.for_gpu_training())"
+
+sft-gpu:
+	$(UV) run python -m training.sft_train
 
 # ----- Sampling -----
 
