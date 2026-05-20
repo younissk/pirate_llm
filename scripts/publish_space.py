@@ -8,9 +8,13 @@ from huggingface_hub import HfApi
 
 SPACE_ID = "younissk/nanoBeard-playground"
 SPACE_DIR = Path("space")
+ASSETS_DIR = SPACE_DIR / "assets"
 COPIES = [
     (Path("training/config.py"), SPACE_DIR / "config.py"),
     (Path("training/model.py"), SPACE_DIR / "model.py"),
+]
+ASSET_COPIES = [
+    (Path("nanoBeard.png"), ASSETS_DIR / "nanoBeard.png"),
 ]
 
 
@@ -24,8 +28,12 @@ def _copy_with_flat_imports(src: Path, dst: Path) -> None:
 
 
 def main() -> None:
+    ASSETS_DIR.mkdir(exist_ok=True)
     for src, dst in COPIES:
         _copy_with_flat_imports(src, dst)
+        print(f"copied {src} -> {dst}")
+    for src, dst in ASSET_COPIES:
+        shutil.copy(src, dst)
         print(f"copied {src} -> {dst}")
 
     token = os.environ["HF_TOKEN"]
