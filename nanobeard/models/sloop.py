@@ -1,10 +1,20 @@
-import math
+"""nanoBeard Sloop — v1 architecture. Frozen: do not modify after shipping."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from training.config import Config
+from nanobeard.config import Config
+
+ARCH_FIELDS = (
+    "vocab_size",
+    "block_size",
+    "n_layer",
+    "n_head",
+    "n_embd",
+    "dropout",
+    "bias",
+)
 
 
 class CausalSelfAttention(nn.Module):
@@ -33,7 +43,7 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
 
-        mask = self.causal_mask[:T, :T]
+        mask = self.causal_mask[:T, :T]  # type: ignore[index]
 
         y, _ = self.attn(x, x, x, attn_mask=mask, need_weights=False)
 
@@ -66,8 +76,8 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln_1(x))  # horizontal mixing
-        x = x + self.mlp(self.ln_2(x))  # vertical processing
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -78,27 +88,19 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
-        # Embedding tables: one for token identity, one for position.
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # token embeddings
-        self.wpe = nn.Embedding(config.block_size, config.n_embd)  # position embeddings
+        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+        self.wpe = nn.Embedding(config.block_size, config.n_embd)
         self.drop = nn.Dropout(config.dropout)
 
-        # The stack of transformer blocks.
         self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
 
-        # Final layer norm before the LM head.
         self.ln_f = nn.LayerNorm(config.n_embd, bias=config.bias)
 
-        # Language modeling head: project from n_embd back to vocab_size logits.
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-        # Weight tying: the input embedding matrix and the LM head share weights.
-        # Both are shape (vocab_size, n_embd) — reuse saves vocab_size * n_embd
-        # parameters. At our scale: 8192 * 384 ≈ 3.1M params saved (huge for tiny models).
+        # Weight tying: input embedding and LM head share weights.
         self.wte.weight = self.lm_head.weight
 
-        # Initialize weights — small standard normal for embeddings/linears,
-        # zero for biases, ones for LayerNorm. Matches GPT-2 / nanoGPT.
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module):
@@ -115,36 +117,26 @@ class GPT(nn.Module):
         targets: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, T = idx.size()
-        assert T <= self.config.block_size, (
+        assert self.config.block_size >= T, (
             f"Cannot forward sequence of length {T}; block_size is {self.config.block_size}"
         )
 
-        # 1. Token embeddings: (B, T) -> (B, T, n_embd)
         tok_emb = self.wte(idx)
 
-        # 2. Position embeddings: just 0, 1, 2, ..., T-1.
-        # nn.Embedding lookup -> (T, n_embd), broadcasts over batch.
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         pos_emb = self.wpe(pos)
 
-        # 3. Combine and apply input dropout.
         x = self.drop(tok_emb + pos_emb)
 
-        # 4. Run through the stack of transformer blocks.
         for block in self.blocks:
             x = block(x)
 
-        # 5. Final norm.
         x = self.ln_f(x)
 
-        # 6. Project to vocabulary logits.
         logits = self.lm_head(x)
 
-        # 7. Compute loss if targets given.
         loss = None
         if targets is not None:
-            # Cross-entropy expects (N, vocab_size) and (N,) where N = B*T.
-            # Flatten the batch and time dimensions together.
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
@@ -153,7 +145,7 @@ class GPT(nn.Module):
         return logits, loss
 
     def num_parameters(self) -> int:
-        """Count parameters. Excludes the position embedding by convention (small)."""
+        """Count parameters. Excludes the position embedding by convention."""
         n = sum(p.numel() for p in self.parameters())
         n -= self.wpe.weight.numel()
         return n

@@ -4,7 +4,6 @@ from arrr import translate
 from datasets import Dataset
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -23,7 +22,6 @@ def _translate_one(text: str) -> str:
 
 
 def piratize(dataset: Dataset, split_name: str = "") -> Dataset:
-
     texts = dataset["text"]
     total = len(texts)
     print(f"total {total:,}")
@@ -41,7 +39,7 @@ def piratize(dataset: Dataset, split_name: str = "") -> Dataset:
         Pool(cpu_count() - 1) as pool,
     ):
         task = progress.add_task(f"⚓ {split_name}", total=total)
-        for i, pirate in enumerate(pool.imap(_translate_one, texts, chunksize=64), 1):
+        for pirate in pool.imap(_translate_one, texts, chunksize=64):
             out.append(pirate)
             progress.advance(task)
 
