@@ -1,4 +1,4 @@
-.PHONY: help install env data tokenizer tokens dataset train train-gpu sft sample publish publish-space clean clean-data clean-ckpt
+.PHONY: help install env data tokenizer tokens dataset train train-gpu sft sample publish publish-space test test-all test-fast test-slow clean clean-data clean-ckpt
 
 UV ?= uv
 CONFIG ?= sloop
@@ -23,6 +23,10 @@ help:
 	@echo "  make sample PROMPT='Ahoy'   Generate from runs/$(CONFIG)/ckpt.pt"
 	@echo "  make publish                Push CONFIG ckpt to its HF model repo"
 	@echo "  make publish-space          Push playground Space"
+	@echo ""
+	@echo "  make test                   Fast tests (excludes slow marker)"
+	@echo "  make test-slow              Slow integration tests only"
+	@echo "  make test-all               Everything"
 	@echo ""
 	@echo "  make clean                  Remove caches + wandb dir"
 	@echo "  make clean-ckpt             Remove runs/$(CONFIG)/"
@@ -74,6 +78,19 @@ publish:
 
 publish-space:
 	$(UV) run python scripts/publish_space.py
+
+# ----- Tests -----
+
+test: test-fast
+
+test-fast:
+	$(UV) run pytest
+
+test-slow:
+	$(UV) run pytest -m slow
+
+test-all:
+	$(UV) run pytest -m "slow or not slow"
 
 # ----- Cleanup -----
 
