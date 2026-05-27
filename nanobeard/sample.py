@@ -14,6 +14,7 @@ from tokenizers import Tokenizer
 from nanobeard.config import Config, load_config
 from nanobeard.models import build_model
 from nanobeard.models.naming import display_name
+from nanobeard.tokenizer_hash import TokenizerMismatch, verify_match
 
 
 @torch.no_grad()
@@ -47,6 +48,14 @@ def load_checkpoint(ckpt_path: str, device: str, tokenizer_path: str | None = No
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
     config: Config = checkpoint["config"]
     config.device = device
+
+    if tokenizer_path is not None:
+        expected = checkpoint.get("tokenizer_sha256")
+        try:
+            verify_match(tokenizer_path, expected)
+        except TokenizerMismatch as e:
+            # Warn, don't hard-fail — user may want to inspect outputs anyway.
+            print(f"WARNING: {e}")
 
     model = build_model(config).to(device)
     model.load_state_dict(checkpoint["model"])

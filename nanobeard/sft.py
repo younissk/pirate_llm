@@ -15,6 +15,7 @@ from nanobeard.config import Config, load_config
 from nanobeard.models import build_model
 from nanobeard.models.naming import display_name
 from nanobeard.sft_data import build_sft_dataset, get_sft_batch
+from nanobeard.tokenizer_hash import hash_file, verify_match
 
 load_dotenv()
 
@@ -65,6 +66,12 @@ def load_pretrained(config: Config, pretrained_repo: str) -> nn.Module:
             f"({arch_cfg.model_name!r}). Use the same architecture."
         )
 
+    # Hard-fail on tokenizer mismatch: SFT against the wrong tokenizer
+    # silently corrupts the model.
+    expected = ckpt.get("tokenizer_sha256")
+    if expected is not None and os.path.exists(config.tokenizer_path):
+        verify_match(config.tokenizer_path, expected)
+
     arch_cfg.dropout = config.dropout
 
     model = build_model(arch_cfg).to(config.device)
@@ -113,6 +120,9 @@ def save_sft_checkpoint(
     model, optimizer, config: Config, iter_num, val_loss, best_val_loss, tag="latest"
 ):
     raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+    tokenizer_sha256 = None
+    if os.path.exists(config.tokenizer_path):
+        tokenizer_sha256 = hash_file(config.tokenizer_path)
     ckpt = {
         "model": raw.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -122,6 +132,7 @@ def save_sft_checkpoint(
         "val_loss": val_loss,
         "best_val_loss": best_val_loss,
         "stage": "sft",
+        "tokenizer_sha256": tokenizer_sha256,
     }
     path = config.sft_ckpt_path
     torch.save(ckpt, path)

@@ -14,6 +14,7 @@ from nanobeard.config import Config, load_config
 from nanobeard.data import get_batch
 from nanobeard.models import build_model
 from nanobeard.models.naming import display_name
+from nanobeard.tokenizer_hash import hash_file
 
 load_dotenv()
 
@@ -153,6 +154,10 @@ def save_checkpoint(
 ):
     raw_model: nn.Module = getattr(model, "_orig_mod", model)
 
+    tokenizer_sha256 = None
+    if os.path.exists(config.tokenizer_path):
+        tokenizer_sha256 = hash_file(config.tokenizer_path)
+
     checkpoint = {
         "model": raw_model.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -161,6 +166,7 @@ def save_checkpoint(
         "iter_num": iter_num,
         "val_loss": val_loss,
         "best_val_loss": best_val_loss,
+        "tokenizer_sha256": tokenizer_sha256,
     }
     path = config.ckpt_path
     torch.save(checkpoint, path)
