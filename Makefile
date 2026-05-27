@@ -81,6 +81,25 @@ publish:
 publish-space:
 	$(UV) run python scripts/publish_space.py
 
+# ----- Dataset to/from HF Hub (skips 30-min piratize on remote machines) -----
+
+push-data:
+	$(UV) run python -m nanobeard.dataset_pipeline.push_to_hf --data-dir $(DATA_DIR)
+
+# ----- Vast.ai -----
+
+vast-launch:
+	CONFIG=$(CONFIG) ./scripts/vast_launch.sh
+
+vast-ssh:
+	@INSTANCE=$$(cat .vast_instance 2>/dev/null) && vastai ssh-url $$INSTANCE
+
+vast-logs:
+	@INSTANCE=$$(cat .vast_instance 2>/dev/null) && vastai logs $$INSTANCE
+
+vast-destroy:
+	./scripts/vast_destroy.sh
+
 # ----- Eval -----
 
 eval:
