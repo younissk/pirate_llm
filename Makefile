@@ -121,6 +121,26 @@ test-slow:
 test-all:
 	$(UV) run pytest -m "slow or not slow"
 
+# ----- Docs -----
+
+docs-serve:
+	$(UV) run mkdocs serve
+
+docs-build:
+	$(UV) run mkdocs build --strict
+
+# ----- Lint / type-check -----
+
+lint:
+	$(UV) run ruff check .
+
+format:
+	$(UV) run ruff format .
+
+typecheck:
+	$(UV) run mypy nanobeard
+	$(UV) run pyright nanobeard
+
 # ----- Cleanup -----
 
 clean:
