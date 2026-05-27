@@ -21,6 +21,8 @@ help:
 	@echo "                              Train model (default: smoke variant)"
 	@echo "  make sft                    SFT a pretrained ckpt"
 	@echo "  make sample PROMPT='Ahoy'   Generate from runs/$(CONFIG)/ckpt.pt"
+	@echo "  make eval                   Perplexity + sample gallery -> evals/results/<date>/$(CONFIG)/"
+	@echo "  make eval-quick             Fast eval (20 batches, short samples)"
 	@echo "  make publish                Push CONFIG ckpt to its HF model repo"
 	@echo "  make publish-space          Push playground Space"
 	@echo ""
@@ -78,6 +80,14 @@ publish:
 
 publish-space:
 	$(UV) run python scripts/publish_space.py
+
+# ----- Eval -----
+
+eval:
+	$(UV) run python -m nanobeard.eval.run --config $(CONFIG_FILE)
+
+eval-quick:
+	$(UV) run python -m nanobeard.eval.run --config $(CONFIG_FILE) --n-batches 20 --max-new-tokens 50
 
 # ----- Tests -----
 
