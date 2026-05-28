@@ -1,6 +1,7 @@
-"""Gradio chat playground for younissk/nanoBeard."""
+"""Gradio chat playground for nanoBeard. Multi-version aware via MODEL_REGISTRY."""
 
 import json
+import os
 
 import gradio as gr
 import torch
@@ -8,26 +9,41 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load_model
 from tokenizers import Tokenizer
 
-from config import Config
-from model import GPT
+from nanobeard.config import Config
+from nanobeard.models import MODEL_REGISTRY, build_model
 
-REPO = "younissk/nanoBeard"
 PROMPT_TEMPLATE = "### Instruction:\n{instruction}\n\n### Response:\n"
-
 MAX_NEW_TOKENS = 200
 TEMPERATURE = 0.7
 TOP_K = 20
 
-cfg_dict = json.load(open(hf_hub_download(REPO, "config.json")))
-cfg = Config(**{k: v for k, v in cfg_dict.items() if k in Config.__dataclass_fields__})
-model = GPT(cfg).eval()
-load_model(model, hf_hub_download(REPO, "model.safetensors"))
-tok = Tokenizer.from_file(hf_hub_download(REPO, "pirate_bpe.json"))
-EOS_ID = tok.token_to_id("<|endoftext|>")
+# Pick which HF model repo to serve. Comma-separated list shows dropdown.
+DEFAULT_REPOS = ",".join(s.hf_repo for s in MODEL_REGISTRY.values())
+REPO_LIST = [
+    r.strip() for r in os.environ.get("NANOBEARD_REPOS", DEFAULT_REPOS).split(",") if r.strip()
+]
+
+
+def _load(repo: str):
+    with open(hf_hub_download(repo, "config.json")) as f:
+        cfg_dict = json.load(f)
+    cfg = Config(**{k: v for k, v in cfg_dict.items() if k in Config.__dataclass_fields__})
+    model = build_model(cfg).eval()
+    load_model(model, hf_hub_download(repo, "model.safetensors"))
+    tok = Tokenizer.from_file(hf_hub_download(repo, "pirate_bpe.json"))
+    eos = tok.token_to_id("<|endoftext|>")
+    display = cfg_dict.get("display_name", f"nanoBeard {cfg_dict.get('codename', '?')}")
+    return cfg, model, tok, eos, display
+
+
+# Eager-load all configured repos so swapping is instant.
+LOADED = {repo: _load(repo) for repo in REPO_LIST}
+DEFAULT_REPO = REPO_LIST[0]
 
 
 @torch.no_grad()
-def respond(message: str, history):
+def respond(message: str, history, repo_choice: str):
+    cfg, model, tok, eos, _ = LOADED[repo_choice]
     prompt = PROMPT_TEMPLATE.format(instruction=message.strip())
     ids = torch.tensor([tok.encode(prompt).ids], dtype=torch.long)
     prompt_len = ids.size(1)
@@ -40,7 +56,7 @@ def respond(message: str, history):
         next_id = torch.multinomial(torch.softmax(logits, dim=-1), num_samples=1)
         ids = torch.cat([ids, next_id], dim=1)
 
-        if EOS_ID is not None and next_id.item() == EOS_ID:
+        if eos is not None and next_id.item() == eos:
             break
 
         yield tok.decode(ids[0, prompt_len:].tolist())
@@ -76,7 +92,6 @@ pirate_theme = gr.themes.Base(
 
 
 PIXEL_CSS = """
-/* ---------- Layout ---------- */
 html, body, gradio-app, .gradio-container, .main, .contain {
     height: 100vh !important;
     max-width: 100% !important;
@@ -86,7 +101,6 @@ html, body, gradio-app, .gradio-container, .main, .contain {
 .gradio-container { font-size: 18px !important; }
 footer { display: none !important; }
 
-/* ---------- Chatbot reset: nuke EVERY visual inside the chatbot ---------- */
 [data-testid="chatbot"] *,
 [data-testid="chatbot"] *::before,
 [data-testid="chatbot"] *::after,
@@ -100,24 +114,18 @@ footer { display: none !important; }
     background-image: none !important;
     color: #f4e4bc !important;
 }
-/* Belt-and-suspenders: user-side bubble class names vary across gradio versions. */
 [class*="user-message"], [class*="user-bubble"], [class*="user"] [class*="message"] {
     background: transparent !important;
     background-color: transparent !important;
 }
-/* Kill any pseudo-element decorations that show as | bars or accents. */
 [data-testid="chatbot"] *::before,
 [data-testid="chatbot"] *::after { display: none !important; }
 
-/* One single border on the chatbot container. */
 [data-testid="chatbot"] {
     border: 2px solid #d4a017 !important;
     background: #2b1810 !important;
 }
 
-/* ---------- Avatars ---------- */
-/* Only the IMG gets a white bg + border; container stays transparent so the
-   message row doesn't turn into a white block. */
 [data-testid="chatbot"] img {
     background: #ffffff !important;
     border: 2px solid #d4a017 !important;
@@ -126,7 +134,6 @@ footer { display: none !important; }
     display: inline-block !important;
 }
 
-/* ---------- Input textbox ---------- */
 textarea, input[type="text"] {
     color: #f4e4bc !important;
     background: #1a0f08 !important;
@@ -139,7 +146,6 @@ textarea::placeholder, input::placeholder {
     opacity: 1 !important;
 }
 
-/* ---------- Example chips: one border on the button itself, none on children ---------- */
 .examples button, [class*="example"] button {
     color: #f4e4bc !important;
     background: #1a0f08 !important;
@@ -152,7 +158,6 @@ textarea::placeholder, input::placeholder {
     color: #f4e4bc !important;
 }
 
-/* ---------- Misc buttons ---------- */
 button { border-radius: 0 !important; }
 h1, h2, h3 { color: #f4c430 !important; text-shadow: 2px 2px 0 #000; }
 """
@@ -171,11 +176,19 @@ textbox = gr.Textbox(
     scale=1,
 )
 
+model_dropdown = gr.Dropdown(
+    choices=[(LOADED[r][4], r) for r in REPO_LIST],
+    value=DEFAULT_REPO,
+    label="Model",
+    visible=len(REPO_LIST) > 1,
+)
+
 with gr.Blocks(title="nanoBeard") as demo:
     gr.ChatInterface(
         respond,
         chatbot=chatbot,
         textbox=textbox,
+        additional_inputs=[model_dropdown],
         examples=[
             ["Tell me a tale of buried treasure."],
             ["What does a pirate eat for breakfast?"],

@@ -1,7 +1,7 @@
 [project]
-name = "pirate-llm"
-version = "0.1.0"
-description = "Add your description here"
+name = "nanobeard"
+version = "0.2.0"
+description = "Tiny pirate LLM — multi-version (Sloop, …)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,5 +13,83 @@ dependencies = [
     "safetensors>=0.7.0",
     "tokenizers>=0.23.1",
     "torch>=2.12.0",
+    "tqdm>=4.66.0",
     "wandb>=0.19.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-xdist>=3.5.0",
+    "pre-commit>=3.7.0",
+    "ruff>=0.13.0",
+    "mypy>=1.10.0",
+    "pyright>=1.1.400",
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.25.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nanobeard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not slow",
+]
+markers = [
+    "slow: integration tests > ~1s (training loops, large fixtures)",
+    "gpu: requires CUDA",
+    "network: requires network access (HF Hub, datasets)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["space/nanobeard"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade
+    "SIM",   # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long — formatter handles this
+    "B008",  # do not perform function call in arg defaults (common in dataclasses)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B018"]    # asserts + useless expressions are fine in tests
+"nanobeard/__init__.py" = ["F401"]  # shim imports
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+exclude = ["space/nanobeard/", "build/", "dist/"]
+
+[[tool.mypy.overrides]]
+module = ["torch.*", "tokenizers.*", "datasets.*", "huggingface_hub.*", "safetensors.*", "gradio.*", "wandb.*", "arrr.*"]
+ignore_missing_imports = true

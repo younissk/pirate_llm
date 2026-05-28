@@ -2,3 +2,5 @@ torch
 safetensors
 tokenizers
 huggingface_hub
+gradio
+numpy

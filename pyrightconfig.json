@@ -1,0 +1,24 @@
+{
+  "include": ["nanobeard", "configs", "tests"],
+  "exclude": [
+    "**/__pycache__",
+    "space/nanobeard",
+    "build",
+    "dist",
+    ".venv",
+    "hf_release",
+    "runs",
+    "data"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "reportPrivateImportUsage": "none",
+  "reportOptionalMemberAccess": "warning",
+  "reportGeneralTypeIssues": "warning",
+  "reportArgumentType": "warning",
+  "useLibraryCodeForTypes": true,
+  "venvPath": ".",
+  "venv": ".venv"
+}

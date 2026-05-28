@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Provision a Vast.ai instance and bootstrap it for nanoBeard training.
+#
+# Prereqs (local):
+#   pip install vastai
+#   vastai set api-key <your-key>             # one-time
+#   export HF_TOKEN=<your-hf-token>
+#
+# Usage:
+#   ./scripts/vast_launch.sh                       # default: RTX 4090, sloop config, gpu variant
+#   GPU=RTX_4090 CONFIG=sloop VARIANT=gpu ./scripts/vast_launch.sh
+
+set -euo pipefail
+
+CONFIG="${CONFIG:-sloop}"
+VARIANT="${VARIANT:-gpu}"
+GPU="${GPU:-RTX_4090}"
+IMAGE="${IMAGE:-pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime}"
+DISK_GB="${DISK_GB:-50}"
+MAX_DPH="${MAX_DPH:-0.40}"           # dollars per hour cap
+INET_DOWN="${INET_DOWN:-200}"        # min Mbps
+REPO_URL="${REPO_URL:-https://github.com/younissk/pirate_llm}"
+
+log() { echo -e "\033[1;32m[vast]\033[0m $*"; }
+
+command -v vastai >/dev/null || { echo "Install vast-cli: pip install vastai"; exit 1; }
+[ -n "${HF_TOKEN:-}" ] || { echo "Set HF_TOKEN in env"; exit 1; }
+
+# 1. Find a cheap matching offer.
+log "Searching for offers: gpu=$GPU, dph<=$MAX_DPH, inet_down>=$INET_DOWN"
+OFFER=$(vastai search offers \
+    "gpu_name=$GPU num_gpus=1 dph_total<=$MAX_DPH inet_down>=$INET_DOWN reliability>=0.95" \
+    -o 'dph+' \
+    --raw 2>/dev/null | python -c "import json,sys; offers=json.load(sys.stdin); print(offers[0]['id']) if offers else sys.exit(1)")
+
+[ -n "$OFFER" ] || { echo "No offers matched — relax constraints (raise MAX_DPH, change GPU)"; exit 1; }
+log "Picked offer $OFFER"
+
+# 2. Create the instance with --onstart so it bootstraps itself.
+ONSTART=$(cat <<EOF
+#!/bin/bash
+set -e
+export HF_TOKEN='$HF_TOKEN'
+export CONFIG='$CONFIG'
+export VARIANT='$VARIANT'
+curl -fsSL $REPO_URL/raw/main/scripts/vast_bootstrap.sh | bash
+EOF
+)
+
+log "Creating instance"
+INSTANCE=$(vastai create instance "$OFFER" \
+    --image "$IMAGE" \
+    --disk "$DISK_GB" \
+    --ssh \
+    --onstart-cmd "$ONSTART" \
+    --raw 2>/dev/null | python -c "import json,sys; print(json.load(sys.stdin)['new_contract'])")
+
+log "Created instance $INSTANCE"
+log "Check status:  vastai show instance $INSTANCE"
+log "SSH:           vastai ssh-url $INSTANCE"
+log "Logs (once up): vastai logs $INSTANCE"
+log "Destroy:       ./scripts/vast_destroy.sh $INSTANCE"
+echo "$INSTANCE" > .vast_instance
+log "Saved instance id to .vast_instance"

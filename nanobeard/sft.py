@@ -1,16 +1,21 @@
+import argparse
 import math
 import os
 import time
 from contextlib import nullcontext
+from typing import cast
 
 import torch
+import torch.nn as nn
 from dotenv import load_dotenv
 from huggingface_hub import HfApi, hf_hub_download
 from torch.amp import GradScaler, autocast
 
-from training.config import Config
-from training.model import GPT
-from training.sft_data import build_sft_dataset, get_sft_batch
+from nanobeard.config import Config, load_config
+from nanobeard.models import build_model
+from nanobeard.models.naming import display_name
+from nanobeard.sft_data import build_sft_dataset, get_sft_batch
+from nanobeard.tokenizer_hash import hash_file, verify_match
 
 load_dotenv()
 
@@ -19,7 +24,7 @@ def setup_training(config: Config):
     torch.manual_seed(config.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(config.seed)
-    os.makedirs(config.out_dir, exist_ok=True)
+    os.makedirs(config.run_dir, exist_ok=True)
 
     ptdtype = {
         "float32": torch.float32,
@@ -27,6 +32,7 @@ def setup_training(config: Config):
         "float16": torch.float16,
     }[config.dtype]
 
+    ctx: nullcontext | autocast
     if config.device == "cuda" and config.dtype != "float32":
         ctx = autocast(device_type="cuda", dtype=ptdtype)
     else:
@@ -36,47 +42,55 @@ def setup_training(config: Config):
     return ctx, scaler
 
 
-def load_pretrained(config: Config, pretrained_repo: str) -> GPT:
-    """Pull pretraining ckpt from HF, build GPT with the SAME architecture, load weights."""
+def load_pretrained(config: Config, pretrained_repo: str) -> nn.Module:
+    """Pull pretraining ckpt from HF, build correct model from ckpt config, load weights."""
     path = hf_hub_download(
         repo_id=pretrained_repo,
         filename="ckpt.pt",
         token=os.environ.get("HF_TOKEN"),
-        local_dir=config.out_dir,
+        local_dir=config.run_dir,
     )
     ckpt = torch.load(path, map_location=config.device, weights_only=False)
     arch_cfg: Config = ckpt["config"]
 
     # Architecture is fixed by the checkpoint — block_size, n_layer, n_embd, vocab_size.
-    # Refuse silent mismatches so we don't accidentally throw away the pretrained wpe.
     if config.block_size != arch_cfg.block_size:
         raise ValueError(
             f"SFT block_size ({config.block_size}) must equal pretraining "
             f"block_size ({arch_cfg.block_size}) — the position embedding is fixed."
         )
 
-    # We DO want to override dropout for SFT (usually 0).
+    if config.model_name != arch_cfg.model_name:
+        raise ValueError(
+            f"SFT model_name ({config.model_name!r}) must match pretraining "
+            f"({arch_cfg.model_name!r}). Use the same architecture."
+        )
+
+    # Hard-fail on tokenizer mismatch: SFT against the wrong tokenizer
+    # silently corrupts the model.
+    expected = ckpt.get("tokenizer_sha256")
+    if expected is not None and os.path.exists(config.tokenizer_path):
+        verify_match(config.tokenizer_path, expected)
+
     arch_cfg.dropout = config.dropout
 
-    model = GPT(arch_cfg).to(config.device)
+    model = build_model(arch_cfg).to(config.device)
     model.load_state_dict(ckpt["model"])
     print(
-        f"Loaded pretrained weights from {pretrained_repo} "
+        f"Loaded pretrained {display_name(arch_cfg, model)} from {pretrained_repo} "
         f"(iter {ckpt['iter_num']}, val {ckpt['val_loss']:.4f})"
     )
     return model
 
 
-def build_optimizer(model: GPT, config: Config) -> torch.optim.AdamW:
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
     decay = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
     no_decay = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]
     groups = [
         {"params": decay, "weight_decay": config.weight_decay},
         {"params": no_decay, "weight_decay": 0.0},
     ]
-    return torch.optim.AdamW(
-        groups, lr=config.learning_rate, betas=(config.beta1, config.beta2)
-    )
+    return torch.optim.AdamW(groups, lr=config.learning_rate, betas=(config.beta1, config.beta2))
 
 
 def get_lr(it: int, config: Config) -> float:
@@ -84,9 +98,7 @@ def get_lr(it: int, config: Config) -> float:
         return config.learning_rate * (it + 1) / (config.warmup_iters + 1)
     if it > config.lr_decay_iters:
         return config.min_lr
-    decay_ratio = (it - config.warmup_iters) / (
-        config.lr_decay_iters - config.warmup_iters
-    )
+    decay_ratio = (it - config.warmup_iters) / (config.lr_decay_iters - config.warmup_iters)
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return config.min_lr + coeff * (config.learning_rate - config.min_lr)
 
@@ -108,23 +120,28 @@ def save_sft_checkpoint(
     model, optimizer, config: Config, iter_num, val_loss, best_val_loss, tag="latest"
 ):
     raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+    tokenizer_sha256 = None
+    if os.path.exists(config.tokenizer_path):
+        tokenizer_sha256 = hash_file(config.tokenizer_path)
     ckpt = {
         "model": raw.state_dict(),
         "optimizer": optimizer.state_dict(),
         "config": config,
+        "model_name": config.model_name,
         "iter_num": iter_num,
         "val_loss": val_loss,
         "best_val_loss": best_val_loss,
         "stage": "sft",
+        "tokenizer_sha256": tokenizer_sha256,
     }
-    path = os.path.join(config.out_dir, "sft_ckpt.pt")
+    path = config.sft_ckpt_path
     torch.save(ckpt, path)
     print(f"  → saved SFT ckpt to {path} ({tag}, val {val_loss:.4f})")
 
-    if config.hf_repo_id:
+    if config.hf_ckpt_repo:
         try:
             HfApi().create_repo(
-                repo_id=config.hf_repo_id,
+                repo_id=config.hf_ckpt_repo,
                 private=config.hf_private,
                 exist_ok=True,
                 token=os.environ.get("HF_TOKEN"),
@@ -132,11 +149,11 @@ def save_sft_checkpoint(
             HfApi().upload_file(
                 path_or_fileobj=path,
                 path_in_repo="sft_ckpt.pt",
-                repo_id=config.hf_repo_id,
+                repo_id=config.hf_ckpt_repo,
                 token=os.environ.get("HF_TOKEN"),
                 commit_message=f"sft iter {iter_num} | val {val_loss:.4f} ({tag})",
             )
-            print(f"  → pushed to {config.hf_repo_id}")
+            print(f"  → pushed to {config.hf_ckpt_repo}")
         except Exception as e:
             print(f"  ! Hub upload failed ({type(e).__name__}: {e}) — continuing")
 
@@ -151,7 +168,7 @@ def sft_train(config: Config, pretrained_repo: str):
     model = load_pretrained(config, pretrained_repo)
     if config.compile:
         print("Compiling model...")
-        model = torch.compile(model)
+        model = cast(nn.Module, torch.compile(model))
 
     optimizer = build_optimizer(model, config)
 
@@ -167,10 +184,7 @@ def sft_train(config: Config, pretrained_repo: str):
         if iter_num % config.eval_interval == 0:
             val_loss = estimate_val_loss(model, val_examples, config, ctx)
             elapsed = time.time() - t0
-            print(
-                f"step {iter_num:>6d} | val {val_loss:.4f} | "
-                f"lr {lr:.2e} | {elapsed:.1f}s"
-            )
+            print(f"step {iter_num:>6d} | val {val_loss:.4f} | lr {lr:.2e} | {elapsed:.1f}s")
             is_best = val_loss < best_val_loss
             if is_best:
                 best_val_loss = val_loss
@@ -204,31 +218,19 @@ def sft_train(config: Config, pretrained_repo: str):
     print(f"\nSFT done. Best val: {best_val_loss:.4f}")
 
 
-if __name__ == "__main__":
-    config = Config(
-        run_name="pirate-sft-v1",
-        out_dir="out_sft",
-        device="cuda",
-        dtype="bfloat16",
-        compile=False,
-        # arch must match pretraining — vocab_size/block_size/n_layer/n_head/n_embd
-        # are pulled from the checkpoint's config; only dropout is overridden below.
-        dropout=0.0,
-        block_size=256,
-        # SFT optimizer
-        learning_rate=2e-5,
-        min_lr=2e-6,
-        weight_decay=0.0,
-        warmup_iters=50,
-        lr_decay_iters=1500,
-        max_iters=1500,
-        # batching / logging
-        batch_size=16,
-        eval_interval=100,
-        eval_iters=20,
-        log_interval=20,
-        # separate HF repo so we don't overwrite the pretraining ckpt
-        hf_repo_id="younissk/pirate-llm-sft-ckpts",
-        resume=False,
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, help="Path to config .py file")
+    parser.add_argument(
+        "--pretrained-repo",
+        default=None,
+        help="HF repo to load pretrained ckpt from. Defaults to config.hf_model_repo.",
     )
-    sft_train(config, pretrained_repo="younissk/pirate-llm-ckpts")
+    args = parser.parse_args()
+    config = load_config(args.config)
+    pretrained = args.pretrained_repo or config.hf_model_repo
+    sft_train(config, pretrained_repo=pretrained)
+
+
+if __name__ == "__main__":
+    main()

@@ -6,7 +6,7 @@ from datasets import load_dataset
 from dotenv import load_dotenv
 from tokenizers import Tokenizer
 
-from training.config import Config
+from nanobeard.config import Config
 
 load_dotenv()
 
@@ -19,7 +19,6 @@ IGNORE_INDEX = -100
 
 
 def render_prompt(example: dict) -> tuple[str, str]:
-    """Return (prompt_text, response_text). Loss is masked on prompt_text."""
     ctx = (example.get("context") or "").strip()
     instr = example["instruction"].strip()
     if ctx:
@@ -32,8 +31,8 @@ def render_prompt(example: dict) -> tuple[str, str]:
 
 @dataclass
 class SFTExample:
-    input_ids: list[int]  # length == block_size, right-padded with eos
-    labels: list[int]  # length == block_size, IGNORE_INDEX on prompt + padding
+    input_ids: list[int]
+    labels: list[int]
 
 
 def encode_example(
@@ -42,24 +41,20 @@ def encode_example(
     block_size: int,
     eos_id: int,
 ) -> SFTExample | None:
-    """Tokenize one example. Returns None if the prompt alone overflows block_size."""
     prompt_text, response_text = render_prompt(example)
 
     prompt_ids = tokenizer.encode(prompt_text).ids
     response_ids = tokenizer.encode(response_text).ids + [eos_id]
 
-    # If the prompt already fills the window, there's no room to learn anything.
     if len(prompt_ids) >= block_size:
         return None
 
     input_ids = prompt_ids + response_ids
     labels = [IGNORE_INDEX] * len(prompt_ids) + response_ids
 
-    # Truncate response if needed.
     input_ids = input_ids[:block_size]
     labels = labels[:block_size]
 
-    # Right-pad with eos for inputs, IGNORE_INDEX for labels.
     pad_len = block_size - len(input_ids)
     input_ids = input_ids + [eos_id] * pad_len
     labels = labels + [IGNORE_INDEX] * pad_len
@@ -81,7 +76,7 @@ def build_sft_dataset(
     examples: list[SFTExample] = []
     skipped = 0
     for row in raw:
-        ex = encode_example(row, tokenizer, config.block_size, eos_id)
+        ex = encode_example(dict(row), tokenizer, config.block_size, eos_id)
         if ex is None:
             skipped += 1
             continue
@@ -104,14 +99,12 @@ def get_sft_batch(
     split_examples: list[SFTExample],
     config: Config,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample a batch. Returns (x, y) shaped (B, T-1) like pretraining get_batch."""
     idxs = torch.randint(0, len(split_examples), (config.batch_size,))
     rows = [split_examples[i] for i in idxs.tolist()]
 
     input_ids = torch.tensor([r.input_ids for r in rows], dtype=torch.long)
     labels = torch.tensor([r.labels for r in rows], dtype=torch.long)
 
-    # Causal shift: predict labels[t+1] from input_ids[:t+1].
     x = input_ids[:, :-1].contiguous()
     y = labels[:, 1:].contiguous()
 
