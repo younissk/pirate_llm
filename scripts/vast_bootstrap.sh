@@ -68,14 +68,18 @@ uv run hf download "$DATA_HF_REPO" \
 }
 
 # 6. Resume training in a detachable tmux session.
+# VARIANT=sft runs the supervised-finetuning entrypoint (loads the pretrained
+# ckpt named by config.pretrained_ckpt_repo); anything else is pretraining.
 SESSION="nanobeard-$CONFIG"
-log "Starting training in tmux session: $SESSION"
+if [ "$VARIANT" = "sft" ]; then ENTRY="nanobeard.sft"; else ENTRY="nanobeard.train"; fi
+log "Starting $ENTRY in tmux session: $SESSION"
 log "  Reattach with:  tmux attach -t $SESSION"
 log "  Detach with:    Ctrl-b d"
 
+mkdir -p "runs/$CONFIG"
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" \
-    "cd $REPO_DIR && CONFIG_VARIANT=$VARIANT uv run python -m nanobeard.train --config configs/$CONFIG.py 2>&1 | tee runs/$CONFIG/train.log"
+    "cd $REPO_DIR && CONFIG_VARIANT=$VARIANT uv run python -m $ENTRY --config configs/$CONFIG.py 2>&1 | tee runs/$CONFIG/train.log"
 
 log "Done. Training is running in tmux ($SESSION)."
 log "Checkpoints will roll to HF if hf_ckpt_repo is set in $CONFIG.py."
