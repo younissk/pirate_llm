@@ -28,7 +28,6 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass
-from multiprocessing import Pool, cpu_count
 
 import torch
 from arrr import translate
@@ -103,20 +102,19 @@ def _empathetic_conversations(limit: int | None) -> list[Conversation]:
 
 
 def _piratize_bot_turns(convs: list[Conversation]) -> None:
-    """Translate every bot turn to pirate-speak in place, in parallel.
+    """Translate every bot turn to pirate-speak in place.
 
-    `arrr.translate` is a deterministic local regex translator, so this is
-    cheap; we still parallelize because there are ~100k turns."""
-    refs = [t for conv in convs for t in conv if t.role == "bot"]
-    texts = [t.text for t in refs]
-    n_proc = max(1, cpu_count() - 1)
-    if n_proc > 1 and len(texts) > 1000:
-        with Pool(n_proc) as pool:
-            translated = pool.map(translate, texts, chunksize=256)
-    else:
-        translated = [translate(t) for t in texts]
-    for t, pirate in zip(refs, translated):
-        t.text = pirate
+    `arrr.translate` is a deterministic local regex translator — ~65k short
+    strings finish in a few seconds, so this runs single-process on purpose.
+    Do NOT reintroduce a multiprocessing Pool: vast.ai containers report the
+    *host* core count via cpu_count(), so Pool(cpu_count()-1) forks ~32 workers
+    and exhausts the container's process limit ("fork: Resource temporarily
+    unavailable") before training even starts.
+    """
+    for conv in convs:
+        for turn in conv:
+            if turn.role == "bot":
+                turn.text = translate(turn.text)
 
 
 # --------------------------------------------------------------------------
