@@ -63,7 +63,9 @@ def make_config_gpu() -> Config:
         data_dir=DATA_DIR,
         run_dir="runs/galleon",
         hf_model_repo="younissk/nanoBeard",
-        hf_ckpt_repo="younissk/pirate-llm-ckpts",
+        # Own repo — galleon's 512-dim/16384-vocab ckpt is incompatible with the
+        # sloop ckpt in pirate-llm-ckpts; sharing would crash resume + clobber it.
+        hf_ckpt_repo="younissk/galleon-ckpts",
         # --- Architecture (scaled up from Sloop) ---
         block_size=512,
         n_layer=8,
