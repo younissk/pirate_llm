@@ -3,8 +3,8 @@
 Design notes:
   - All fixtures use CPU + tiny models so the full fast suite runs in seconds.
   - Synthetic data (random uint16 .bin, generated tokenizer) — no network, no
-    real corpus. The real `data/sloop/pirate_bpe.json` is used only by tests
-    that explicitly opt in via the `real_tokenizer` fixture.
+    real corpus. The real shipped tokenizer is used only by tests that
+    explicitly opt in via the `real_tokenizer` fixture.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from tokenizers.trainers import BpeTrainer
 from nanobeard.config import Config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REAL_TOKENIZER = REPO_ROOT / "data" / "sloop" / "pirate_bpe.json"
+REAL_TOKENIZER = REPO_ROOT / "data" / "datasets" / "tiny_pirate_stories" / "pirate_bpe.json"
 
 
 @pytest.fixture(autouse=True)

@@ -11,16 +11,24 @@ pre-commit install        # one-time, enables format/lint on commit
 
 ## Build the dataset
 
-Each model version owns its own dataset directory under `data/<version>/`.
-For Sloop that's `data/sloop/`.
+Datasets are composed from reusable **sources**. A *source* is one piratized
+corpus, cached under `data/sources/<name>/`. A *dataset* lives under
+`data/datasets/<name>/`, defined by a `recipe.json` that lists the sources to
+combine; building it produces a tokenizer (`pirate_bpe.json`), `train.bin` /
+`val.bin`, and a `metadata.json` (provenance + token counts).
 
 ```bash
-make data       CONFIG=sloop   # piratize TinyStories
-make tokenizer  CONFIG=sloop   # train BPE
-make tokens     CONFIG=sloop   # tokenize corpus -> train.bin, val.bin
-# or do all three in one shot:
-make dataset    CONFIG=sloop
+# Build (and cache) one source — piratizes TinyStories the first time.
+make source  SOURCE=tiny_stories_pirate
+
+# Build a dataset from its recipe: combine sources -> tokenizer + bins + metadata.
+make dataset DATASET=tiny_pirate_stories
 ```
+
+`make dataset` materializes any sources its recipe needs, so the explicit
+`make source` step is optional. To compose a new dataset, create
+`data/datasets/<name>/recipe.json` (see `pirate_enhanced/` for the pattern) and
+run `make dataset DATASET=<name>`.
 
 ## Train
 

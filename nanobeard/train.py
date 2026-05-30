@@ -19,6 +19,29 @@ from nanobeard.tokenizer_hash import hash_file
 load_dotenv()
 
 
+def resolve_vocab_size(config: Config) -> Config:
+    """The dataset's tokenizer is the source of truth for vocab_size.
+
+    The model embedding (config.vocab_size) MUST equal the tokenizer vocab, or
+    token ids index out of range. If the built tokenizer exists, override
+    config.vocab_size to match it — so the recipe's vocab_size is the single
+    knob and configs need not track it. No-op if the tokenizer isn't built yet.
+    """
+    if not os.path.exists(config.tokenizer_path):
+        return config
+
+    from tokenizers import Tokenizer
+
+    tok_vocab = Tokenizer.from_file(config.tokenizer_path).get_vocab_size()
+    if config.vocab_size != tok_vocab:
+        print(
+            f"vocab_size: overriding config value {config.vocab_size} -> "
+            f"{tok_vocab} (from tokenizer {config.tokenizer_path})"
+        )
+        config.vocab_size = tok_vocab
+    return config
+
+
 def setup_training(config: Config):
     torch.manual_seed(config.seed)
     if torch.cuda.is_available():
@@ -192,6 +215,7 @@ def train(config: Config):
     print(f"\n=== Training run: {config.run_name} ===")
     print(f"Device: {config.device}, dtype: {config.dtype}, compile: {config.compile}")
 
+    config = resolve_vocab_size(config)
     ctx, scaler = setup_training(config)
     ensure_hub_repo(config)
     wandb_run = maybe_init_wandb(config)

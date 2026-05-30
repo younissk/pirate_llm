@@ -22,6 +22,7 @@ nav:
   - Architecture: architecture.md
   - Adding a model: adding-a-model.md
   - Eval harness: eval.md
+  - LLM-chess arena: llm-chess.md
   - Vast.ai: vast-ai.md
   - TODO: todo.md
 

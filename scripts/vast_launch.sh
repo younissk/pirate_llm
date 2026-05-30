@@ -14,6 +14,7 @@ set -euo pipefail
 
 CONFIG="${CONFIG:-sloop}"
 VARIANT="${VARIANT:-gpu}"
+DATASET="${DATASET:-tiny_pirate_stories}"
 GPU="${GPU:-RTX_4090}"
 IMAGE="${IMAGE:-pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime}"
 DISK_GB="${DISK_GB:-50}"
@@ -43,6 +44,7 @@ set -e
 export HF_TOKEN='$HF_TOKEN'
 export CONFIG='$CONFIG'
 export VARIANT='$VARIANT'
+export DATASET='$DATASET'
 curl -fsSL $REPO_URL/raw/main/scripts/vast_bootstrap.sh | bash
 EOF
 )

@@ -1,0 +1,37 @@
+{
+  "name": "PirateEnhanced",
+  "description": "TinyPirateStories + cosmopedia (wikihow + stories subsample), all piratized, plus gutenberg_books (5 public-domain pirate books, NOT piratized) for normal-language exposure. Equal weights concatenate; unequal weights interleave by sampling probability. Add more sources as they are registered in nanobeard/dataset_pipeline/sources.py.",
+  "sources": [
+    {
+      "name": "tiny_stories_pirate",
+      "weight": 1.0,
+      "origin": "roneneldan/TinyStories piratized via arrr",
+      "train_rows": 2119719,
+      "row_share": 0.5586
+    },
+    {
+      "name": "cosmopedia_wikihow",
+      "weight": 1.0,
+      "origin": "HuggingFaceTB/cosmopedia (wikihow subset) piratized via arrr",
+      "train_rows": 174191,
+      "row_share": 0.0459
+    },
+    {
+      "name": "cosmopedia_stories",
+      "weight": 1.0,
+      "origin": "HuggingFaceTB/cosmopedia (stories subset, 1500000 subsample) piratized via arrr",
+      "train_rows": 1498000,
+      "row_share": 0.3947
+    },
+    {
+      "name": "gutenberg_books",
+      "weight": 1.0,
+      "origin": "Project Gutenberg, NOT piratized: pyle_book_of_pirates (#973), treasure_island (#120), general_history_of_pyrates (#40580), peter_pan (#16), coral_island (#646)",
+      "train_rows": 2992,
+      "row_share": 0.0008
+    }
+  ],
+  "vocab_size": 16384,
+  "train_tokens": 1550721266,
+  "val_tokens": 11280655
+}

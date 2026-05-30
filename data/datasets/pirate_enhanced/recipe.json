@@ -1,0 +1,11 @@
+{
+  "name": "PirateEnhanced",
+  "description": "TinyPirateStories + cosmopedia (wikihow + stories subsample), all piratized, plus gutenberg_books (5 public-domain pirate books, NOT piratized) for normal-language exposure. Equal weights concatenate; unequal weights interleave by sampling probability. Add more sources as they are registered in nanobeard/dataset_pipeline/sources.py.",
+  "sources": [
+    {"name": "tiny_stories_pirate", "weight": 1.0},
+    {"name": "cosmopedia_wikihow", "weight": 1.0},
+    {"name": "cosmopedia_stories", "weight": 1.0},
+    {"name": "gutenberg_books", "weight": 1.0}
+  ],
+  "vocab_size": 16384
+}

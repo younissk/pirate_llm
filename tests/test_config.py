@@ -13,7 +13,7 @@ from nanobeard.config import Config, load_config
 def test_default_config_has_required_fields():
     cfg = Config()
     assert cfg.model_name == "sloop"
-    assert cfg.data_dir == "data/sloop"
+    assert cfg.data_dir == "data/datasets/tiny_pirate_stories"
     assert cfg.run_dir == "runs/sloop"
     assert cfg.hf_model_repo == "younissk/nanoBeard"
 

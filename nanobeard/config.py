@@ -13,7 +13,7 @@ class Config:
     model_name: str = "sloop"
 
     # ----- Paths (everything else derives from these two) -----
-    data_dir: str = "data/sloop"  # holds train.bin, val.bin, tokenizer
+    data_dir: str = "data/datasets/tiny_pirate_stories"  # holds train.bin, val.bin, tokenizer
     run_dir: str = "runs/sloop"  # holds ckpt.pt, sft_ckpt.pt
 
     # ----- Model architecture -----

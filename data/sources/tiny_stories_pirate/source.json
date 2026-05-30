@@ -1,0 +1,8 @@
+{
+  "name": "tiny_stories_pirate",
+  "origin": "roneneldan/TinyStories piratized via arrr",
+  "rows": {
+    "train": 2119719,
+    "validation": 21990
+  }
+}
