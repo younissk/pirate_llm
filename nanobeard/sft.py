@@ -74,6 +74,12 @@ def load_pretrained(config: Config, pretrained_repo: str) -> nn.Module:
 
     arch_cfg.dropout = config.dropout
 
+    # The architecture (incl. vocab_size) is fixed by the pretrained ckpt.
+    # Sync it onto the SFT config so save_sft_checkpoint stores a config that
+    # matches the weights — otherwise sampling rebuilds the model at the
+    # Config default vocab (8192) and load_state_dict fails on a size mismatch.
+    config.vocab_size = arch_cfg.vocab_size
+
     model = build_model(arch_cfg).to(config.device)
     model.load_state_dict(ckpt["model"])
     print(
