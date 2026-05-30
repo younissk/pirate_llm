@@ -22,9 +22,13 @@ DATA_HF_REPO="${DATA_HF_REPO:-younissk/nanobeard-data-${DATASET}}"
 log() { echo -e "\033[1;34m[bootstrap]\033[0m $*"; }
 
 # 1. System deps. Most CUDA images already have python + git.
+# build-essential (gcc) is required: torch.compile's inductor/triton backend
+# JIT-compiles CUDA kernels through a C compiler, which the pytorch *-runtime
+# images do not ship. Without it, compile=True crashes at the first step.
 log "Installing system tools"
 if ! command -v git >/dev/null;  then apt-get update -y && apt-get install -y git curl; fi
 if ! command -v tmux >/dev/null; then apt-get install -y tmux; fi
+if ! command -v gcc  >/dev/null; then apt-get update -y && apt-get install -y build-essential; fi
 
 # 2. uv (fast Python install).
 if ! command -v uv >/dev/null; then
