@@ -14,9 +14,10 @@ set -euo pipefail
 
 CONFIG="${CONFIG:-sloop}"
 VARIANT="${VARIANT:-gpu}"
+DATASET="${DATASET:-tiny_pirate_stories}"
 REPO_URL="${REPO_URL:-https://github.com/younissk/pirate_llm}"
 REPO_DIR="${REPO_DIR:-$HOME/pirate_llm}"
-DATA_HF_REPO="${DATA_HF_REPO:-younissk/nanobeard-data-${CONFIG}}"
+DATA_HF_REPO="${DATA_HF_REPO:-younissk/nanobeard-data-${DATASET}}"
 
 log() { echo -e "\033[1;34m[bootstrap]\033[0m $*"; }
 
@@ -45,22 +46,21 @@ log "uv sync"
 uv sync --no-dev
 
 # 5. Pull dataset from HF Hub (instead of running the full pipeline).
-log "Pulling dataset $DATA_HF_REPO -> data/$CONFIG/"
-mkdir -p "data/$CONFIG"
+DATA_DIR="data/datasets/$DATASET"
+log "Pulling dataset $DATA_HF_REPO -> $DATA_DIR/"
+mkdir -p "$DATA_DIR"
 if [ -n "${HF_TOKEN:-}" ]; then
     HF_TOKEN_FLAG="--token $HF_TOKEN"
 else
     HF_TOKEN_FLAG=""
 fi
 # shellcheck disable=SC2086
-uv run huggingface-cli download "$DATA_HF_REPO" \
+uv run hf download "$DATA_HF_REPO" \
     --repo-type dataset \
-    --local-dir "data/$CONFIG" \
+    --local-dir "$DATA_DIR" \
     $HF_TOKEN_FLAG || {
-    log "Dataset $DATA_HF_REPO not on Hub yet — fall back to local pipeline"
-    uv run python -m nanobeard.dataset_pipeline.tiny_stories     --data-dir "data/$CONFIG"
-    uv run python -m nanobeard.dataset_pipeline.tokenize_ds      --data-dir "data/$CONFIG"
-    uv run python -m nanobeard.dataset_pipeline.tokenize_corpus  --data-dir "data/$CONFIG"
+    log "Dataset $DATA_HF_REPO not on Hub yet — fall back to local build from recipe"
+    uv run python -m nanobeard.dataset_pipeline.build --dataset "$DATASET"
 }
 
 # 6. Resume training in a detachable tmux session.

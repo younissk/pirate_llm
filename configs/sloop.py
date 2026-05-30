@@ -17,7 +17,7 @@ def make_config_smoke() -> Config:
     return Config(
         run_name="sloop-m1-smoke",
         model_name="sloop",
-        data_dir="data/sloop",
+        data_dir="data/datasets/tiny_pirate_stories",
         run_dir="runs/sloop-smoke",
         hf_model_repo="younissk/nanoBeard",
         device="mps",
@@ -37,7 +37,7 @@ def make_config_gpu() -> Config:
     return Config(
         run_name="sloop-gpu",
         model_name="sloop",
-        data_dir="data/sloop",
+        data_dir="data/datasets/tiny_pirate_stories",
         run_dir="runs/sloop",
         hf_model_repo="younissk/nanoBeard",
         hf_ckpt_repo="younissk/pirate-llm-ckpts",
@@ -55,7 +55,7 @@ def make_config_sft() -> Config:
     return Config(
         run_name="sloop-sft",
         model_name="sloop",
-        data_dir="data/sloop",
+        data_dir="data/datasets/tiny_pirate_stories",
         run_dir="runs/sloop-sft",
         hf_model_repo="younissk/nanoBeard",
         hf_ckpt_repo="younissk/pirate-llm-sft-ckpts",

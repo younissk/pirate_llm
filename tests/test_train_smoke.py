@@ -11,7 +11,25 @@ import pytest
 import torch
 
 from nanobeard.config import Config
-from nanobeard.train import train
+from nanobeard.train import resolve_vocab_size, train
+
+
+def test_resolve_vocab_size_overrides_from_tokenizer(tokenized_cfg: Config):
+    """Tokenizer vocab wins over a mismatched config value."""
+    from tokenizers import Tokenizer
+
+    expected = Tokenizer.from_file(tokenized_cfg.tokenizer_path).get_vocab_size()
+    tokenized_cfg.vocab_size = 999
+    out = resolve_vocab_size(tokenized_cfg)
+    assert out.vocab_size == expected != 999
+
+
+def test_resolve_vocab_size_noop_without_tokenizer(tiny_cfg: Config):
+    """No tokenizer built yet -> config value is left untouched."""
+    tiny_cfg.vocab_size = 4242
+    assert not os.path.exists(tiny_cfg.tokenizer_path)
+    out = resolve_vocab_size(tiny_cfg)
+    assert out.vocab_size == 4242
 
 
 @pytest.mark.slow

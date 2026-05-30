@@ -63,18 +63,23 @@ MODEL_REGISTRY = {
 ## 4. Add a config
 
 `configs/brig.py` mirroring `configs/sloop.py`, with `model_name="brig"`,
-`data_dir="data/brig"`, `run_dir="runs/brig"`, and Brig-specific
-hyperparameters / arch fields.
+`data_dir="data/datasets/<dataset>"` (the dataset Brig trains on),
+`run_dir="runs/brig"`, and Brig-specific hyperparameters / arch fields.
+
+Models and datasets are decoupled: a config just points `data_dir` at a built
+dataset, so multiple models can share one dataset (and one model can be
+retrained on different datasets).
 
 ## 5. Build the dataset
 
 ```bash
-make dataset CONFIG=brig
+make dataset DATASET=<dataset>
 ```
 
-If Brig uses a bigger corpus or different tokenizer vocab size, edit
-`nanobeard/dataset_pipeline/` accordingly — bumping `vocab_size` in
-`tokenize_ds.py` is usually enough.
+To use a bigger corpus, register a new source in
+`nanobeard/dataset_pipeline/sources.py` and add it to the dataset's
+`recipe.json`. To change tokenizer vocab size, set `vocab_size` in that same
+`recipe.json` — each dataset trains its own tokenizer.
 
 ## 6. Train
 

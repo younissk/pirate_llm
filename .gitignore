@@ -21,11 +21,16 @@ runs/
 *.bin
 *.safetensors
 
-# Generated piratized datasets — recreate with `make data CONFIG=<version>`
-data/*/tiny_stories_pirate/
-dataset/tiny_stories_pirate/
+# Materialized source corpora (arrow shards) — rebuild via
+# `python -m nanobeard.dataset_pipeline.sources --source <name>`.
+# Ignore each source's contents but NOT the dir, so source.json can be kept
+# (git can't re-include a file whose parent dir is excluded).
+data/sources/*/*
+# ...but keep each source's provenance manifest.
+!data/sources/*/source.json
 
-# Tokenizers are small + worth versioning — keep them.
+# Tokenizers + recipes + metadata are small text — version them.
+# (train.bin/val.bin are already covered by *.bin above.)
 !data/**/pirate_bpe.json
 !pirate_bpe.json
 
@@ -45,3 +50,6 @@ site/
 
 # ---- vast.ai state ----
 .vast_instance
+
+# ---- llm-chess eval caches (regenerable; re-run the arena) ----
+evals/llm-chess/results/*_cache.jsonl

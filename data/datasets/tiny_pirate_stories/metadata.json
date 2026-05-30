@@ -1,0 +1,16 @@
+{
+  "name": "TinyPirateStories",
+  "description": "Piratized TinyStories \u2014 the original nanoBeard corpus (formerly data/sloop).",
+  "sources": [
+    {
+      "name": "tiny_stories_pirate",
+      "weight": 1.0,
+      "origin": "roneneldan/TinyStories piratized via arrr",
+      "train_rows": 2119719,
+      "row_share": 1.0
+    }
+  ],
+  "vocab_size": 8192,
+  "train_tokens": 505261464,
+  "val_tokens": 5083780
+}

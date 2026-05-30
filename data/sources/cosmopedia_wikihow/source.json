@@ -1,0 +1,8 @@
+{
+  "name": "cosmopedia_wikihow",
+  "origin": "HuggingFaceTB/cosmopedia (wikihow subset) piratized via arrr",
+  "rows": {
+    "train": 174191,
+    "validation": 5000
+  }
+}

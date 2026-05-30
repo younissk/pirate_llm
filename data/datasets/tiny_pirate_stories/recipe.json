@@ -1,0 +1,11 @@
+{
+  "name": "TinyPirateStories",
+  "description": "Piratized TinyStories \u2014 the original nanoBeard corpus (formerly data/sloop).",
+  "sources": [
+    {
+      "name": "tiny_stories_pirate",
+      "weight": 1.0
+    }
+  ],
+  "vocab_size": 8192
+}

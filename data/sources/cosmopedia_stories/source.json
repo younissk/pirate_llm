@@ -1,0 +1,8 @@
+{
+  "name": "cosmopedia_stories",
+  "origin": "HuggingFaceTB/cosmopedia (stories subset, 1500000 subsample) piratized via arrr",
+  "rows": {
+    "train": 1498000,
+    "validation": 2000
+  }
+}

@@ -1,9 +1,11 @@
-.PHONY: help install env data tokenizer tokens dataset train train-gpu sft sample publish publish-space test test-all test-fast test-slow clean clean-data clean-ckpt
+.PHONY: help install env source dataset train train-gpu sft sample publish publish-space test test-all test-fast test-slow clean clean-data clean-ckpt
 
 UV ?= uv
 CONFIG ?= sloop
 CONFIG_FILE = configs/$(CONFIG).py
-DATA_DIR = data/$(CONFIG)
+DATASET ?= tiny_pirate_stories
+DATA_DIR = data/datasets/$(DATASET)
+SOURCE ?= tiny_stories_pirate
 PROMPT ?= Once upon a time
 
 help:
@@ -12,10 +14,11 @@ help:
 	@echo "  make install                Install Python deps via uv"
 	@echo "  make env                    Copy example.env -> .env"
 	@echo ""
-	@echo "  make dataset                Full data pipeline for CONFIG"
-	@echo "  make data                   Piratize TinyStories  -> $(DATA_DIR)/tiny_stories_pirate"
-	@echo "  make tokenizer              Train BPE             -> $(DATA_DIR)/pirate_bpe.json"
-	@echo "  make tokens                 Tokenize corpus       -> $(DATA_DIR)/train.bin, val.bin"
+	@echo "  make source SOURCE=<name>   Build+cache one source -> data/sources/<name>/"
+	@echo "  make prepare DATASET=<name> Download+cache all of a recipe's sources (no tokenizer/bins)"
+	@echo "  make dataset DATASET=<name> Build a dataset from its recipe.json:"
+	@echo "                              combine sources -> tokenizer + train.bin/val.bin + metadata"
+	@echo "                              -> $(DATA_DIR)/"
 	@echo ""
 	@echo "  make train CONFIG=$(CONFIG) CONFIG_VARIANT=smoke|gpu"
 	@echo "                              Train model (default: smoke variant)"
@@ -44,18 +47,17 @@ env:
 		cp example.env .env && echo "Created .env from example.env — fill in your tokens"; \
 	fi
 
-# ----- Data pipeline (per CONFIG) -----
+# ----- Data pipeline -----
+# Sources are reusable corpora; datasets compose them via data/datasets/<name>/recipe.json.
 
-data:
-	$(UV) run python -m nanobeard.dataset_pipeline.tiny_stories --data-dir $(DATA_DIR)
+source:
+	$(UV) run python -m nanobeard.dataset_pipeline.sources --source $(SOURCE) $(if $(FORCE),--force,)
 
-tokenizer:
-	$(UV) run python -m nanobeard.dataset_pipeline.tokenize_ds --data-dir $(DATA_DIR)
+prepare:
+	$(UV) run python -m nanobeard.dataset_pipeline.build --dataset $(DATASET) --sources-only $(if $(FORCE),--force,)
 
-tokens:
-	$(UV) run python -m nanobeard.dataset_pipeline.tokenize_corpus --data-dir $(DATA_DIR)
-
-dataset: data tokenizer tokens
+dataset:
+	$(UV) run python -m nanobeard.dataset_pipeline.build --dataset $(DATASET)
 
 # ----- Training -----
 
@@ -151,4 +153,4 @@ clean-ckpt:
 	rm -rf runs/$(CONFIG)/
 
 clean-data:
-	rm -rf $(DATA_DIR)/train.bin $(DATA_DIR)/val.bin $(DATA_DIR)/pirate_bpe.json $(DATA_DIR)/tiny_stories_pirate
+	rm -rf $(DATA_DIR)/train.bin $(DATA_DIR)/val.bin $(DATA_DIR)/pirate_bpe.json $(DATA_DIR)/metadata.json

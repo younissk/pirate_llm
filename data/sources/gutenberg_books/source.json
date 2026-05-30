@@ -1,0 +1,8 @@
+{
+  "name": "gutenberg_books",
+  "origin": "Project Gutenberg, NOT piratized: pyle_book_of_pirates (#973), treasure_island (#120), general_history_of_pyrates (#40580), peter_pan (#16), coral_island (#646)",
+  "rows": {
+    "train": 2992,
+    "validation": 500
+  }
+}

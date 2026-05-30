@@ -1,24 +1,29 @@
-"""Print a random piratized story.
+"""Print a random piratized story from a cached source.
 
 Run:
-  uv run python -m nanobeard.dataset_pipeline.pirate_stories --data-dir data/sloop
+  uv run python -m nanobeard.dataset_pipeline.pirate_stories --source tiny_stories_pirate
 """
 
 import argparse
 import random
-from pathlib import Path
 
 from datasets import load_from_disk
+
+from nanobeard.dataset_pipeline.sources import source_dir
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", required=True, help="Data directory, e.g. data/sloop")
+    parser.add_argument(
+        "--source", default="tiny_stories_pirate", help="Source name under data/sources/"
+    )
+    parser.add_argument("--split", default="train")
     args = parser.parse_args()
 
-    pirate_ds = load_from_disk(str(Path(args.data_dir) / "tiny_stories_pirate"))
-    i = random.randint(0, len(pirate_ds["train"]) - 1)
-    print(pirate_ds["train"][i]["text"])
+    ds = load_from_disk(str(source_dir(args.source)))
+    split = ds[args.split]
+    i = random.randint(0, len(split) - 1)
+    print(split[i]["text"])
 
 
 if __name__ == "__main__":

@@ -33,9 +33,10 @@ The repo is structured for **multiple ship-class versions** under one codebase:
 nanobeard/             # package: training, sampling, SFT, publish, eval
   models/              # one file per architecture, registered via MODEL_REGISTRY
   eval/                # perplexity + sample-gallery harness
-  dataset_pipeline/    # piratize TinyStories, train BPE, tokenize bins
+  dataset_pipeline/    # sources (piratized corpora) + recipe-driven dataset builds
 configs/               # one .py per model version
-data/<version>/        # per-version corpus + tokenizer + bins
+data/sources/<name>/   # reusable piratized corpora (cached arrow + source.json)
+data/datasets/<name>/  # composed datasets: recipe.json + tokenizer + bins + metadata
 runs/<version>/        # per-version checkpoints
 evals/                 # prompt set + per-eval reports
 space/                 # Gradio playground (multi-version dropdown)
@@ -70,7 +71,7 @@ uv sync --dev                      # dev tooling (pytest, ruff, mypy, mkdocs)
 make env                           # .env from example
 pre-commit install                 # format/lint on commit
 
-make dataset CONFIG=sloop          # piratize + tokenize -> data/sloop/
+make dataset DATASET=tiny_pirate_stories   # build -> data/datasets/tiny_pirate_stories/
 make train   CONFIG=sloop          # local smoke
 make train   CONFIG=sloop CONFIG_VARIANT=gpu   # GPU run
 make sample  CONFIG=sloop PROMPT='Ahoy matey'
@@ -129,7 +130,7 @@ See `docs/adding-a-model.md`. TL;DR:
 1. Write `nanobeard/models/<key>.py` (new arch, frozen contract).
 2. Register a `ModelSpec` in `nanobeard/models/__init__.py`.
 3. Drop a config in `configs/<key>.py`.
-4. `make dataset CONFIG=<key>` / `make train CONFIG=<key>`.
+4. `make dataset DATASET=<name>` / `make train CONFIG=<key>`.
 5. `make test` — contract suite parametrizes automatically.
 6. `make publish CONFIG=<key>` to its own HF model repo.
 

@@ -4,7 +4,10 @@
 # Prereqs (local):
 #   pip install vastai
 #   vastai set api-key <your-key>             # one-time
+#   set -a; source .env; set +a               # loads HF_TOKEN + WANDB_API_KEY
+#   # or export them by hand:
 #   export HF_TOKEN=<your-hf-token>
+#   export WANDB_API_KEY=<your-wandb-key>     # optional; omit to skip wandb
 #
 # Usage:
 #   ./scripts/vast_launch.sh                       # default: RTX 4090, sloop config, gpu variant
@@ -14,6 +17,7 @@ set -euo pipefail
 
 CONFIG="${CONFIG:-sloop}"
 VARIANT="${VARIANT:-gpu}"
+DATASET="${DATASET:-tiny_pirate_stories}"
 GPU="${GPU:-RTX_4090}"
 IMAGE="${IMAGE:-pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime}"
 DISK_GB="${DISK_GB:-50}"
@@ -25,6 +29,7 @@ log() { echo -e "\033[1;32m[vast]\033[0m $*"; }
 
 command -v vastai >/dev/null || { echo "Install vast-cli: pip install vastai"; exit 1; }
 [ -n "${HF_TOKEN:-}" ] || { echo "Set HF_TOKEN in env"; exit 1; }
+[ -n "${WANDB_API_KEY:-}" ] || log "WANDB_API_KEY unset — training runs without wandb logging"
 
 # 1. Find a cheap matching offer.
 log "Searching for offers: gpu=$GPU, dph<=$MAX_DPH, inet_down>=$INET_DOWN"
@@ -41,8 +46,10 @@ ONSTART=$(cat <<EOF
 #!/bin/bash
 set -e
 export HF_TOKEN='$HF_TOKEN'
+export WANDB_API_KEY='${WANDB_API_KEY:-}'
 export CONFIG='$CONFIG'
 export VARIANT='$VARIANT'
+export DATASET='$DATASET'
 curl -fsSL $REPO_URL/raw/main/scripts/vast_bootstrap.sh | bash
 EOF
 )

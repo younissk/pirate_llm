@@ -21,12 +21,11 @@ def _translate_one(text: str) -> str:
     return translate(text)
 
 
-def piratize(dataset: Dataset, split_name: str = "") -> Dataset:
-    texts = dataset["text"]
-    total = len(texts)
-    print(f"total {total:,}")
-    out = []
-
+def _piratize_gen(dataset: Dataset, split_name: str, chunk_size: int, n_proc: int):
+    """Top-level generator (must be picklable for Dataset.from_generator's
+    fingerprint). Yields one pirate-translated row at a time, pulling input in
+    chunks so peak memory stays ~one chunk."""
+    total = len(dataset)
     with (
         Progress(
             TextColumn("[bold blue]{task.description}"),
@@ -36,11 +35,29 @@ def piratize(dataset: Dataset, split_name: str = "") -> Dataset:
             TimeRemainingColumn(),
             console=console,
         ) as progress,
-        Pool(cpu_count() - 1) as pool,
+        Pool(n_proc) as pool,
     ):
         task = progress.add_task(f"⚓ {split_name}", total=total)
-        for pirate in pool.imap(_translate_one, texts, chunksize=64):
-            out.append(pirate)
-            progress.advance(task)
+        for start in range(0, total, chunk_size):
+            texts = dataset[start : start + chunk_size]["text"]
+            for pirate in pool.imap(_translate_one, texts, chunksize=64):
+                yield {"text": pirate}
+                progress.advance(task)
 
-    return Dataset.from_dict({"text": out})
+
+def piratize(dataset: Dataset, split_name: str = "", chunk_size: int = 10_000) -> Dataset:
+    """Translate every `text` row to pirate-speak via `arrr`, in parallel.
+
+    Memory-bounded: `Dataset.from_generator` writes the streamed rows straight
+    to disk (Arrow), so peak RAM is ~one chunk rather than two full copies of
+    the split. Output order matches input (`imap` is ordered)."""
+    print(f"total {len(dataset):,}")
+    return Dataset.from_generator(
+        _piratize_gen,
+        gen_kwargs={
+            "dataset": dataset,
+            "split_name": split_name,
+            "chunk_size": chunk_size,
+            "n_proc": max(1, cpu_count() - 1),
+        },
+    )
