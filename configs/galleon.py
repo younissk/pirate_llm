@@ -36,7 +36,7 @@ def make_config_smoke() -> Config:
         model_name="sloop",
         data_dir=DATA_DIR,
         run_dir="runs/galleon-smoke",
-        hf_model_repo="younissk/nanoBeard",
+        hf_model_repo="younissk/nanoBeard-galleon-34M",
         block_size=512,
         n_layer=8,
         n_head=8,
@@ -62,7 +62,7 @@ def make_config_gpu() -> Config:
         model_name="sloop",
         data_dir=DATA_DIR,
         run_dir="runs/galleon",
-        hf_model_repo="younissk/nanoBeard",
+        hf_model_repo="younissk/nanoBeard-galleon-34M",
         # Own repo — galleon's 512-dim/16384-vocab ckpt is incompatible with the
         # sloop ckpt in pirate-llm-ckpts; sharing would crash resume + clobber it.
         hf_ckpt_repo="younissk/galleon-ckpts",
@@ -88,10 +88,53 @@ def make_config_gpu() -> Config:
     )
 
 
+def make_config_sft() -> Config:
+    """Chat SFT on top of the pretrained Galleon (RTX 4090).
+
+    block_size MUST equal the pretraining block_size (512) — load_pretrained
+    hard-fails otherwise, since the position embedding is fixed. The 512 window
+    is also why Galleon is the right base for the chat/memory goal: ~5-6 short
+    turns fit, vs ~2-3 at Sloop's 256.
+    """
+    return Config(
+        run_name="galleon-sft",
+        model_name="sloop",
+        data_dir=DATA_DIR,
+        run_dir="runs/galleon-sft",
+        hf_model_repo="younissk/nanoBeard-galleon-34M",
+        hf_ckpt_repo="younissk/galleon-sft-ckpts",
+        # SFT loads the pretraining ckpt.pt from here (not the model repo).
+        pretrained_ckpt_repo="younissk/galleon-ckpts",
+        block_size=512,  # must match pretraining
+        n_layer=8,
+        n_head=8,
+        n_embd=512,
+        dropout=0.0,
+        device="cuda",
+        dtype="bfloat16",
+        compile=False,  # short run; compile's warmup + dynamic shapes aren't worth it
+        # SFT optimizer: low LR, no weight decay.
+        learning_rate=2e-5,
+        min_lr=2e-6,
+        weight_decay=0.0,
+        warmup_iters=100,
+        lr_decay_iters=3000,
+        max_iters=3000,
+        batch_size=16,
+        gradient_accumulation_steps=2,  # effective batch 32
+        eval_interval=200,
+        eval_iters=50,
+        log_interval=20,
+        resume=False,
+        wandb_project="pirate-llm",
+    )
+
+
 def make_config() -> Config:
-    """Variant dispatcher. CONFIG_VARIANT=smoke|gpu (default: smoke)."""
+    """Variant dispatcher. CONFIG_VARIANT=smoke|gpu|sft (default: smoke)."""
     variant = os.environ.get("CONFIG_VARIANT", "smoke")
     return {
         "smoke": make_config_smoke,
         "gpu": make_config_gpu,
+        "sft": make_config_sft,
     }[variant]()

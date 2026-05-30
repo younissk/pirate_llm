@@ -117,7 +117,7 @@ def estimate_val_loss(model, val_examples, config: Config, ctx) -> float:
 
 
 def save_sft_checkpoint(
-    model, optimizer, config: Config, iter_num, val_loss, best_val_loss, tag="latest"
+    model, optimizer, config: Config, iter_num, val_loss, best_val_loss, tag="latest", push=False
 ):
     raw = model._orig_mod if hasattr(model, "_orig_mod") else model
     tokenizer_sha256 = None
@@ -138,7 +138,9 @@ def save_sft_checkpoint(
     torch.save(ckpt, path)
     print(f"  → saved SFT ckpt to {path} ({tag}, val {val_loss:.4f})")
 
-    if config.hf_ckpt_repo:
+    # Only push improvements to the Hub — uploading every eval churns ~165MB
+    # (model+optimizer) onto the same filename for no gain.
+    if config.hf_ckpt_repo and push:
         try:
             HfApi().create_repo(
                 repo_id=config.hf_ckpt_repo,
@@ -196,6 +198,7 @@ def sft_train(config: Config, pretrained_repo: str):
                 val_loss,
                 best_val_loss,
                 tag="best" if is_best else "latest",
+                push=is_best,
             )
 
         x, y = get_sft_batch(train_examples, config)
@@ -215,6 +218,24 @@ def sft_train(config: Config, pretrained_repo: str):
 
         iter_num += 1
 
+    # Final checkpoint: the eval-interval cadence otherwise discards the last
+    # (max_iters % eval_interval) steps. Evaluate + save the finished model;
+    # push if it's the best we've seen.
+    val_loss = estimate_val_loss(model, val_examples, config, ctx)
+    is_best = val_loss < best_val_loss
+    if is_best:
+        best_val_loss = val_loss
+    save_sft_checkpoint(
+        model,
+        optimizer,
+        config,
+        iter_num,
+        val_loss,
+        best_val_loss,
+        tag="best" if is_best else "final",
+        push=is_best,
+    )
+
     print(f"\nSFT done. Best val: {best_val_loss:.4f}")
 
 
@@ -228,7 +249,9 @@ def main():
     )
     args = parser.parse_args()
     config = load_config(args.config)
-    pretrained = args.pretrained_repo or config.hf_model_repo
+    # The pretraining ckpt.pt lives in pretrained_ckpt_repo, NOT the model repo
+    # (which holds safetensors). Fall back to hf_model_repo only for legacy use.
+    pretrained = args.pretrained_repo or config.pretrained_ckpt_repo or config.hf_model_repo
     sft_train(config, pretrained_repo=pretrained)
 
 

@@ -24,6 +24,7 @@ def generate(
     max_new_tokens: int,
     temperature: float = 0.8,
     top_k: int | None = 40,
+    eos_id: int | None = None,
 ) -> torch.Tensor:
     block_size: int = model.config.block_size  # type: ignore[union-attr,assignment]
 
@@ -39,8 +40,58 @@ def generate(
         probs = F.softmax(logits, dim=-1)
         next_idx = torch.multinomial(probs, num_samples=1)
         idx = torch.cat((idx, next_idx), dim=1)
+        # Stop a turn as soon as the model emits end-of-text (used by --chat).
+        if eos_id is not None and next_idx.item() == eos_id:
+            break
 
     return idx
+
+
+def chat_repl(model, tokenizer, args) -> None:
+    """Interactive pirate chat with a rolling memory window.
+
+    Renders the transcript in the SFT format (User:/Pirate:), appends a
+    "Pirate:" cue, generates a reply until <|endoftext|>, and keeps the most
+    recent turns that fit in block_size.
+    """
+    from nanobeard.sft_data import Turn, build_chat_prompt_ids
+
+    block_size: int = model.config.block_size  # type: ignore[union-attr,assignment]
+    eos_id = tokenizer.token_to_id("<|endoftext|>")
+
+    print("\n⚓ Pirate chat — type your message, Ctrl-C or 'quit' to leave.\n")
+    history: list[Turn] = []
+    while True:
+        try:
+            user_msg = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nFair winds!")
+            return
+        if user_msg.lower() in {"quit", "exit"}:
+            print("Fair winds!")
+            return
+        if not user_msg:
+            continue
+
+        history.append(Turn("user", user_msg))
+        prompt_ids = build_chat_prompt_ids(
+            history, tokenizer, eos_id, block_size, reserve=args.max_tokens
+        )
+        idx = torch.tensor(prompt_ids, dtype=torch.long, device=args.device).unsqueeze(0)
+        out_idx = generate(
+            model,
+            idx,
+            max_new_tokens=args.max_tokens,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            eos_id=eos_id,
+        )
+        reply_ids = out_idx[0, len(prompt_ids):].cpu().tolist()
+        if reply_ids and reply_ids[-1] == eos_id:
+            reply_ids = reply_ids[:-1]
+        reply = tokenizer.decode(reply_ids).strip()
+        history.append(Turn("bot", reply))
+        print(f"Pirate: {reply}\n")
 
 
 def load_checkpoint(ckpt_path: str, device: str, tokenizer_path: str | None = None) -> nn.Module:
@@ -84,6 +135,11 @@ def main():
     parser.add_argument("--top-k", type=int, default=40)
     parser.add_argument("--num-samples", type=int, default=3)
     parser.add_argument("--device", default=None, help="cuda / mps / cpu (auto-detect if None)")
+    parser.add_argument(
+        "--chat",
+        action="store_true",
+        help="Interactive multi-turn pirate chat (for SFT checkpoints).",
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -107,6 +163,10 @@ def main():
 
     tokenizer = Tokenizer.from_file(tokenizer_path)
     model = load_checkpoint(ckpt_path, args.device, tokenizer_path=tokenizer_path)
+
+    if args.chat:
+        chat_repl(model, tokenizer, args)
+        return
 
     prompt_ids = tokenizer.encode(args.prompt).ids
     idx = torch.tensor(prompt_ids, dtype=torch.long, device=args.device).unsqueeze(0)

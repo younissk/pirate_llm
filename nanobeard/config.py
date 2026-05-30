@@ -54,6 +54,7 @@ class Config:
     # ----- HF Hub -----
     hf_model_repo: str = "younissk/nanoBeard"  # final published model repo
     hf_ckpt_repo: str | None = None  # rolling ckpt sync repo (private)
+    pretrained_ckpt_repo: str | None = None  # SFT source: repo holding pretraining ckpt.pt
     hf_private: bool = True
     resume: bool = True
 
