@@ -6,6 +6,8 @@ import torch.nn as nn
 
 from nanobeard.config import Config
 
+from .frigate import ARCH_FIELDS as FRIGATE_ARCH_FIELDS
+from .frigate import GPT as GPTFrigate
 from .sloop import ARCH_FIELDS as SLOOP_ARCH_FIELDS
 from .sloop import GPT as GPTSloop
 
@@ -28,16 +30,13 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         cls=GPTSloop,
         arch_fields=SLOOP_ARCH_FIELDS,
     ),
-    # When v2 is ready: uncomment, import GPT as GPTBrig from .brig, rename
-    # codename + hf_repo below. Nothing else in the codebase needs to change.
-    #
-    # "brig": ModelSpec(
-    #     dispatch_key="brig",
-    #     codename="Brig",
-    #     hf_repo="younissk/nanoBeard-Brig",
-    #     cls=GPTBrig,
-    #     arch_fields=BRIG_ARCH_FIELDS,
-    # ),
+    "frigate": ModelSpec(
+        dispatch_key="frigate",
+        codename="Frigate",
+        hf_repo="younissk/nanoBeard-frigate-126M",
+        cls=GPTFrigate,
+        arch_fields=FRIGATE_ARCH_FIELDS,
+    ),
 }
 
 

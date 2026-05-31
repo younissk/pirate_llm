@@ -1,6 +1,10 @@
 .PHONY: help install env source dataset train train-gpu sft sample publish publish-space test test-all test-fast test-slow clean clean-data clean-ckpt
 
 UV ?= uv
+# Longer HF download timeout — the default is short and trips on slow shards /
+# brief network stalls during the multi-hour data build (esp. Wikipedia).
+HF_HUB_DOWNLOAD_TIMEOUT ?= 60
+export HF_HUB_DOWNLOAD_TIMEOUT
 CONFIG ?= sloop
 CONFIG_FILE = configs/$(CONFIG).py
 DATASET ?= tiny_pirate_stories

@@ -14,6 +14,7 @@ from nanobeard.config import Config, load_config
 from nanobeard.data import get_batch
 from nanobeard.models import build_model
 from nanobeard.models.naming import display_name
+from nanobeard.optim import build_optimizer
 from nanobeard.tokenizer_hash import hash_file
 
 load_dotenv()
@@ -42,6 +43,36 @@ def resolve_vocab_size(config: Config) -> Config:
     return config
 
 
+def resolve_max_iters(config: Config) -> Config:
+    """Translate config.epochs into a training horizon (max_iters + lr_decay_iters).
+
+    1 epoch = one full pass over train.bin:
+        iters/epoch = train_tokens / (batch_size * block_size * grad_accum)
+    The configured max_iters stays a HARD CEILING — it keeps smoke runs short
+    (their tiny max_iters wins over a full epoch on a big corpus) and stops any
+    run from overshooting. lr_decay_iters is synced to the resolved horizon so
+    cosine decay spans the whole run. No-op if train.bin isn't built yet.
+    """
+    if not os.path.exists(config.train_bin):
+        return config
+
+    train_tokens = os.path.getsize(config.train_bin) // 2  # uint16 = 2 bytes/token
+    tokens_per_iter = (
+        config.batch_size * config.block_size * config.gradient_accumulation_steps
+    )
+    epoch_iters = max(1, round(config.epochs * train_tokens / tokens_per_iter))
+    horizon = min(epoch_iters, config.max_iters)
+
+    print(
+        f"epochs={config.epochs}: {epoch_iters} iters for a full pass over "
+        f"{train_tokens:,} tokens; training {horizon} iters "
+        f"(max_iters ceiling {config.max_iters})."
+    )
+    config.max_iters = horizon
+    config.lr_decay_iters = horizon
+    return config
+
+
 def setup_training(config: Config):
     torch.manual_seed(config.seed)
     if torch.cuda.is_available():
@@ -62,30 +93,6 @@ def setup_training(config: Config):
 
     scaler = GradScaler(enabled=(config.dtype == "float16"))
     return ctx, scaler
-
-
-def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
-    decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
-    no_decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]
-
-    optim_groups = [
-        {"params": decay_params, "weight_decay": config.weight_decay},
-        {"params": no_decay_params, "weight_decay": 0.0},
-    ]
-
-    optimizer = torch.optim.AdamW(
-        optim_groups,
-        lr=config.learning_rate,
-        betas=(config.beta1, config.beta2),
-    )
-
-    n_decay = sum(p.numel() for p in decay_params)
-    n_no_decay = sum(p.numel() for p in no_decay_params)
-    print(f"Optimizer: AdamW, lr={config.learning_rate}, betas=({config.beta1}, {config.beta2})")
-    print(f"  Decayed params:    {n_decay:,} ({len(decay_params)} tensors)")
-    print(f"  No-decay params:   {n_no_decay:,} ({len(no_decay_params)} tensors)")
-
-    return optimizer
 
 
 def get_lr(it: int, config: Config) -> float:
@@ -216,6 +223,7 @@ def train(config: Config):
     print(f"Device: {config.device}, dtype: {config.dtype}, compile: {config.compile}")
 
     config = resolve_vocab_size(config)
+    config = resolve_max_iters(config)
     ctx, scaler = setup_training(config)
     ensure_hub_repo(config)
     wandb_run = maybe_init_wandb(config)
@@ -248,7 +256,9 @@ def train(config: Config):
     while iter_num < config.max_iters:
         lr = get_lr(iter_num, config)
         for pg in optimizer.param_groups:
-            pg["lr"] = lr
+            # lr_ratio lets Muon's group run at a higher peak LR than AdamW's
+            # while sharing one cosine schedule (ratio 1.0 for AdamW groups).
+            pg["lr"] = lr * pg.get("lr_ratio", 1.0)
 
         if iter_num % config.eval_interval == 0:
             losses = estimate_loss(model, config, ctx)

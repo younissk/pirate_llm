@@ -25,12 +25,24 @@ class Config:
     dropout: float = 0.1
     bias: bool = False
 
+    # ----- Architecture flags (Frigate+; Sloop/Galleon leave all False) -----
+    use_rope: bool = False  # RoPE rotary pos-emb instead of learned wpe table
+    use_swiglu: bool = False  # SwiGLU FFN (8/3 expansion) instead of GELU MLP
+    use_rmsnorm: bool = False  # RMSNorm instead of LayerNorm
+    use_qk_norm: bool = False  # per-head RMSNorm on Q and K (stabilizes depth)
+    rope_theta: float = 10000.0  # RoPE base frequency
+
     # ----- Optimizer -----
-    learning_rate: float = 3e-4
+    optimizer: str = "adamw"  # "adamw" | "muon"
+    learning_rate: float = 3e-4  # AdamW peak LR (and fallback LR under Muon)
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # Muon (only used when optimizer == "muon"); embeddings/head/norms stay AdamW.
+    muon_lr: float = 0.02  # Muon peak LR — much higher than AdamW's
+    muon_momentum: float = 0.95
+    muon_ns_steps: int = 5  # Newton-Schulz iterations per step
 
     # ----- LR schedule -----
     warmup_iters: int = 200
@@ -38,7 +50,8 @@ class Config:
     min_lr: float = 3e-5
 
     # ----- Training loop -----
-    max_iters: int = 20000
+    epochs: float = 1.0  # passes over train.bin; resolves to max_iters at train start
+    max_iters: int = 20000  # hard ceiling on iters (and the smoke-run cap)
     batch_size: int = 32
     gradient_accumulation_steps: int = 1
     eval_interval: int = 500

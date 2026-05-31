@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Tools for `scripts/export_onnx.py` (ONNX + tokenizer for the mobile app).
+# Not needed for training: `uv sync --group export` to install.
+export = [
+    "onnx>=1.21.0",
+    "onnxruntime>=1.26.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-xdist>=3.5.0",
