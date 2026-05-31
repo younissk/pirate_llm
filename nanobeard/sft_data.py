@@ -261,7 +261,12 @@ def build_chat_prompt_ids(
             if turn.role == "user":
                 ids += _enc(tokenizer, sep + USER_PREFIX + turn.text)
             else:
-                ids += _enc(tokenizer, sep + BOT_PREFIX + turn.text) + [eos_id]
+                # Split the encode at the prefix boundary EXACTLY as training
+                # does (see encode_conversation) — a joint encode of
+                # "Pirate: <text>" merges BPE across the boundary and attaches a
+                # leading space to the first reply word, producing token ids the
+                # model never saw in training and degrading recall of prior turns.
+                ids += _enc(tokenizer, sep + BOT_PREFIX) + _enc(tokenizer, turn.text) + [eos_id]
         # Trailing cue the model completes.
         cue_sep = "" if not hist else TURN_SEP
         ids += _enc(tokenizer, cue_sep + BOT_PREFIX)

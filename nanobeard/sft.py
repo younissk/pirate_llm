@@ -14,6 +14,7 @@ from torch.amp import GradScaler, autocast
 from nanobeard.config import Config, load_config
 from nanobeard.models import build_model
 from nanobeard.models.naming import display_name
+from nanobeard.optim import build_optimizer
 from nanobeard.sft_data import build_sft_dataset, get_sft_batch
 from nanobeard.tokenizer_hash import hash_file, verify_match
 
@@ -87,16 +88,6 @@ def load_pretrained(config: Config, pretrained_repo: str) -> nn.Module:
         f"(iter {ckpt['iter_num']}, val {ckpt['val_loss']:.4f})"
     )
     return model
-
-
-def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
-    decay = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
-    no_decay = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]
-    groups = [
-        {"params": decay, "weight_decay": config.weight_decay},
-        {"params": no_decay, "weight_decay": 0.0},
-    ]
-    return torch.optim.AdamW(groups, lr=config.learning_rate, betas=(config.beta1, config.beta2))
 
 
 def get_lr(it: int, config: Config) -> float:
@@ -187,7 +178,7 @@ def sft_train(config: Config, pretrained_repo: str):
     while iter_num < config.max_iters:
         lr = get_lr(iter_num, config)
         for pg in optimizer.param_groups:
-            pg["lr"] = lr
+            pg["lr"] = lr * pg.get("lr_ratio", 1.0)
 
         if iter_num % config.eval_interval == 0:
             val_loss = estimate_val_loss(model, val_examples, config, ctx)

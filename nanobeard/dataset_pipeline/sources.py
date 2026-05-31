@@ -111,6 +111,89 @@ def build_cosmopedia_stories(
     )
 
 
+def _build_cosmopedia_subset(config: str, val_rows: int, seed: int = 1337) -> DatasetDict:
+    """Full HuggingFaceTB/cosmopedia <config> subset, piratized.
+
+    Uses the named config (downloads every shard) rather than the selective
+    shard-picking of build_cosmopedia_stories — we want the whole subset here.
+    """
+    from nanobeard.dataset_pipeline.piratize import piratize
+
+    full = load_dataset("HuggingFaceTB/cosmopedia", config, split="train")
+    full = full.select_columns(["text"])  # keep schema lean
+    split = full.train_test_split(test_size=val_rows, seed=seed)
+    return DatasetDict(
+        {"train": piratize(split["train"], "train"), "validation": piratize(split["test"], "validation")}
+    )
+
+
+def build_cosmopedia_stories_full(val_rows: int = 5000) -> DatasetDict:
+    """ALL of HuggingFaceTB/cosmopedia 'stories' (~5M rows), piratized.
+    (build_cosmopedia_stories is the subsampled variant.)"""
+    return _build_cosmopedia_subset("stories", val_rows)
+
+
+def build_cosmopedia_stanford(val_rows: int = 5000) -> DatasetDict:
+    """ALL of HuggingFaceTB/cosmopedia 'stanford' subset, piratized."""
+    return _build_cosmopedia_subset("stanford", val_rows)
+
+
+WIKIPEDIA_CONFIG = "20231101.en"
+_WIKI_SHARDS = 41  # wikimedia/wikipedia 20231101.en parquet shards
+_WIKI_PIRATE_RE = re.compile(r"\bpirate", re.I)  # pirate / pirates / pirated
+
+
+def _wikipedia_shard_file(i: int) -> str:
+    return f"{WIKIPEDIA_CONFIG}/train-{i:05d}-of-{_WIKI_SHARDS:05d}.parquet"
+
+
+def build_wikipedia_pirate(val_rows: int = 500, seed: int = 1337) -> DatasetDict:
+    """English Wikipedia articles mentioning 'pirate', NOT piratized.
+
+    No server-side substring filter exists for wikimedia/wikipedia, so every
+    shard's text must be scanned. To survive network drops / laptop sleep on the
+    ~1h pass, this is RESUMABLE: it streams the 41 shards one at a time and only
+    commits a shard's matches (+ marks it done) once that shard finishes whole.
+    A crash resumes from the next unscanned shard rather than restarting. Still
+    streaming — no full local copy of Wikipedia, and at most one shard's matches
+    are held in memory. Kept as authentic prose (like gutenberg_books).
+    """
+    from nanobeard.dataset_pipeline.log import info
+
+    scan_dir = source_dir("wikipedia_pirate") / "_scan"
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    matches_path = scan_dir / "matches.jsonl"
+    done_path = scan_dir / "done_shards.json"
+
+    done = set(json.loads(done_path.read_text())) if done_path.exists() else set()
+    kept_total = sum(1 for _ in matches_path.open()) if matches_path.exists() else 0
+    if done:
+        info(f"wikipedia resume: {len(done)}/{_WIKI_SHARDS} shards already scanned, {kept_total:,} kept so far")
+
+    for i in range(_WIKI_SHARDS):
+        if i in done:
+            continue
+        info(f"wikipedia shard {i + 1}/{_WIKI_SHARDS}: streaming + scanning")
+        shard = load_dataset(
+            "wikimedia/wikipedia", data_files=_wikipedia_shard_file(i), split="train", streaming=True
+        )
+        buf = [row["text"] for row in shard if _WIKI_PIRATE_RE.search(row["text"])]
+        # Commit only after the WHOLE shard streamed (a mid-shard crash redoes
+        # this shard cleanly — no half-written duplicates).
+        with matches_path.open("a", encoding="utf-8") as out:
+            for text in buf:
+                out.write(json.dumps({"text": text}) + "\n")
+        done.add(i)
+        done_path.write_text(json.dumps(sorted(done)))
+        kept_total += len(buf)
+        info(f"wikipedia shard {i + 1}/{_WIKI_SHARDS} done: +{len(buf):,} matches ({kept_total:,} total)")
+
+    info(f"wikipedia scan complete: {kept_total:,} articles kept across {_WIKI_SHARDS} shards")
+    ds = load_dataset("json", data_files=str(matches_path), split="train")
+    split = ds.train_test_split(test_size=val_rows, seed=seed)
+    return DatasetDict({"train": split["train"], "validation": split["test"]})
+
+
 _PG_START = re.compile(r"\*\*\*\s*START OF TH(?:E|IS) PROJECT GUTENBERG EBOOK.*?\*\*\*", re.I | re.S)
 _PG_END = re.compile(r"\*\*\*\s*END OF TH(?:E|IS) PROJECT GUTENBERG EBOOK", re.I)
 
@@ -167,6 +250,18 @@ REGISTRY: dict[str, SourceSpec] = {
         "builder": build_cosmopedia_stories,
         "origin": f"HuggingFaceTB/cosmopedia (stories subset, {COSMOPEDIA_STORIES_ROWS} subsample) piratized via arrr",
     },
+    "cosmopedia_stories_full": {
+        "builder": build_cosmopedia_stories_full,
+        "origin": "HuggingFaceTB/cosmopedia (full stories subset) piratized via arrr",
+    },
+    "cosmopedia_stanford": {
+        "builder": build_cosmopedia_stanford,
+        "origin": "HuggingFaceTB/cosmopedia (full stanford subset) piratized via arrr",
+    },
+    "wikipedia_pirate": {
+        "builder": build_wikipedia_pirate,
+        "origin": "wikimedia/wikipedia 20231101.en, articles matching /\\bpirate/i, NOT piratized",
+    },
     "gutenberg_books": {
         "builder": build_gutenberg_books,
         "origin": "Project Gutenberg, NOT piratized: "
@@ -185,15 +280,22 @@ def is_cached(name: str) -> bool:
 
 def materialize(name: str, force: bool = False) -> DatasetDict:
     """Return a source's DatasetDict, building + caching it on first use."""
+    from nanobeard.dataset_pipeline.log import info, step
+
     if name not in REGISTRY:
         raise KeyError(f"Unknown source {name!r}. Known: {sorted(REGISTRY)}")
 
     out = source_dir(name)
     if is_cached(name) and not force:
-        return load_from_disk(str(out))
+        ds = load_from_disk(str(out))
+        info(f"source [bold]{name}[/]: cache hit — { {k: len(v) for k, v in ds.items()} }")
+        return ds
 
     spec = REGISTRY[name]
+    step(f"Materialize source '{name}'{' (forced rebuild)' if force else ''}")
+    info(f"origin: {spec['origin']}")
     ds = spec["builder"]()
+    info(f"source [bold]{name}[/]: built — { {k: len(v) for k, v in ds.items()} }; caching → {out}")
     if out.exists():  # clear a stale cache so old shards can't linger
         shutil.rmtree(out)
     out.parent.mkdir(parents=True, exist_ok=True)

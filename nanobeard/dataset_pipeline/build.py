@@ -27,6 +27,7 @@ from pathlib import Path
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, interleave_datasets
 
+from nanobeard.dataset_pipeline.log import info, step
 from nanobeard.dataset_pipeline.sources import REGISTRY, materialize
 from nanobeard.dataset_pipeline.tokenize_corpus import encode_split
 from nanobeard.dataset_pipeline.tokenize_ds import train_tokenizer
@@ -72,9 +73,11 @@ def build(dataset: str) -> dict:
 
     src_specs = recipe["sources"]
     weights = [float(s.get("weight", 1.0)) for s in src_specs]
+    step(f"Build dataset '{dataset}' — {len(src_specs)} source(s): {[s['name'] for s in src_specs]}")
     materialized = {s["name"]: materialize(s["name"]) for s in src_specs}
 
     # Combine per split, keeping only sources that actually carry that split.
+    step("Combine sources")
     combined: dict[str, Dataset] = {}
     for split in SPLITS:
         present = [
@@ -84,24 +87,30 @@ def build(dataset: str) -> dict:
         ]
         if present:
             combined[split] = combine([p for p, _ in present], [w for _, w in present])
+            info(f"{split}: {len(combined[split]):,} rows from {len(present)} source(s)")
     ds = DatasetDict(combined)
     if "train" not in ds:
         raise ValueError("No source provided a 'train' split")
 
     # Tokenizer (per-dataset; vocab_size is recipe-controlled for experiments).
     vocab_size = int(recipe.get("vocab_size", 8192))
+    step(f"Train BPE tokenizer — vocab {vocab_size:,} over {len(ds['train']):,} train rows")
     tokenizer = train_tokenizer(ds["train"], vocab_size=vocab_size)
     tokenizer.save(str(ds_dir / "pirate_bpe.json"))
     eot_id = tokenizer.token_to_id("<|endoftext|>")
     assert eot_id is not None, "Tokenizer must define <|endoftext|>"
     assert tokenizer.get_vocab_size() < 2**16, "vocab too large for uint16"
+    info(f"tokenizer trained — {tokenizer.get_vocab_size():,} tokens → {ds_dir / 'pirate_bpe.json'}")
 
+    step("Encode splits → uint16 .bin")
     train_tokens = encode_split(ds["train"], tokenizer, eot_id, ds_dir / "train.bin")
+    info(f"train.bin: {train_tokens:,} tokens")
     val_tokens = (
         encode_split(ds["validation"], tokenizer, eot_id, ds_dir / "val.bin")
         if "validation" in ds
         else 0
     )
+    info(f"val.bin: {val_tokens:,} tokens")
 
     total_rows = sum(len(materialized[s["name"]].get("train", [])) for s in src_specs)
     meta = {
@@ -124,6 +133,7 @@ def build(dataset: str) -> dict:
         "val_tokens": val_tokens,
     }
     (ds_dir / "metadata.json").write_text(json.dumps(meta, indent=2))
+    step(f"Done '{dataset}' — {train_tokens:,} train + {val_tokens:,} val tokens, vocab {meta['vocab_size']:,}")
     return meta
 
 

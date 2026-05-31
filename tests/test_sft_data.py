@@ -31,6 +31,13 @@ def _real_labels(ex):
     return [lbl for lbl in ex.labels if lbl != IGNORE_INDEX]
 
 
+def _contains(haystack, needle):
+    return any(
+        haystack[i : i + len(needle)] == needle
+        for i in range(len(haystack) - len(needle) + 1)
+    )
+
+
 def test_encode_single_turn_shape(tok, eos_id):
     conv = [Turn("user", "ahoy there"), Turn("bot", "matey treasure")]
     ex = encode_conversation(conv, tok, block_size=64, eos_id=eos_id)
@@ -103,6 +110,27 @@ def test_chat_prompt_ends_with_bot_cue(tok, eos_id):
     cue_ids = tok.encode("\n" + BOT_PREFIX).ids if False else tok.encode(BOT_PREFIX).ids
     # Prompt must end with the Pirate: cue so the model completes the reply.
     assert ids[-len(cue_ids):] == cue_ids
+
+
+def test_completed_bot_turn_tokenized_like_training(tok, eos_id):
+    """Inference must render a completed bot turn with the SAME token ids as
+    training. A joint encode of "Pirate: <text>" merges BPE across the prefix
+    boundary (leading-space first word) -> tokens the model never trained on ->
+    degraded recall of prior turns. Guard against that regression."""
+    bot_text = "ahoy matey treasure"
+    history = [Turn("user", "hello there"), Turn("bot", bot_text), Turn("user", "more")]
+    ids = build_chat_prompt_ids(history, tok, eos_id, block_size=128, reserve=8)
+
+    # Training renders a completed bot turn as: enc("\nPirate: ") | enc(text) | eos
+    train_bot_seg = (
+        tok.encode("\n" + BOT_PREFIX).ids + tok.encode(bot_text).ids + [eos_id]
+    )
+    assert _contains(ids, train_bot_seg)
+
+    # The buggy joint form must NOT appear.
+    joint_bot_seg = tok.encode("\n" + BOT_PREFIX + bot_text).ids + [eos_id]
+    if joint_bot_seg != train_bot_seg:  # only meaningful when BPE actually differs
+        assert not _contains(ids, joint_bot_seg)
 
 
 def test_chat_prompt_respects_budget_and_forgets_oldest(tok, eos_id):
