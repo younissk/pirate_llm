@@ -23,6 +23,10 @@ IMAGE="${IMAGE:-pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime}"
 DISK_GB="${DISK_GB:-50}"
 MAX_DPH="${MAX_DPH:-1.10}"           # dollars per hour cap (RTX_4090 floor is ~$1.07)
 INET_DOWN="${INET_DOWN:-200}"        # min Mbps
+# Minimum host CUDA driver. The pinned torch (>=2.12) ships a cu12.9+ wheel that
+# refuses to init on older drivers ("NVIDIA driver too old"), so reject hosts
+# whose driver predates 12.9 up front instead of crashing after the dataset pull.
+CUDA_VERS="${CUDA_VERS:-12.9}"
 REPO_URL="${REPO_URL:-https://github.com/younissk/pirate_llm}"
 
 log() { echo -e "\033[1;32m[vast]\033[0m $*"; }
@@ -32,17 +36,17 @@ command -v vastai >/dev/null || { echo "Install vast-cli: pip install vastai"; e
 [ -n "${WANDB_API_KEY:-}" ] || log "WANDB_API_KEY unset — training runs without wandb logging"
 
 # 1. Find a cheap matching offer.
-log "Searching for offers: gpu=$GPU, dph<=$MAX_DPH, inet_down>=$INET_DOWN"
+log "Searching for offers: gpu=$GPU, dph<=$MAX_DPH, inet_down>=$INET_DOWN, cuda_vers>=$CUDA_VERS"
 # `|| true`: a no-match must not abort under `set -e` (the python prints an
 # empty id), so the friendly hint below can fire instead of dying silently.
 OFFER=$(vastai search offers \
-    "gpu_name=$GPU num_gpus=1 dph_total<=$MAX_DPH inet_down>=$INET_DOWN reliability>=0.95" \
+    "gpu_name=$GPU num_gpus=1 dph_total<=$MAX_DPH inet_down>=$INET_DOWN reliability>=0.95 cuda_vers>=$CUDA_VERS" \
     -o 'dph+' \
     --raw 2>/dev/null | python -c "import json,sys; offers=json.load(sys.stdin); print(offers[0]['id'] if offers else '')") || true
 
 [ -n "$OFFER" ] || {
-    echo "No offers matched gpu=$GPU at dph<=$MAX_DPH, inet_down>=$INET_DOWN, reliability>=0.95."
-    echo "Relax constraints, e.g.:  MAX_DPH=1.20 $0   or   GPU=RTX_3090 $0"
+    echo "No offers matched gpu=$GPU at dph<=$MAX_DPH, inet_down>=$INET_DOWN, reliability>=0.95, cuda_vers>=$CUDA_VERS."
+    echo "Relax constraints, e.g.:  MAX_DPH=1.20 $0   or   GPU=RTX_3090 $0   or   CUDA_VERS=12.4 $0"
     exit 1
 }
 log "Picked offer $OFFER"

@@ -46,8 +46,12 @@ cd "$REPO_DIR"
 git pull --ff-only || true
 
 # 4. Sync deps.
-log "uv sync"
-uv sync --no-dev
+# Pin Python 3.12 explicitly: .python-version is gitignored, so a fresh box
+# would otherwise let uv grab the newest interpreter (3.14), which drags in a
+# different torch build than the locally-tested 3.12 environment.
+log "uv sync (python 3.12)"
+uv python install 3.12
+uv sync --no-dev --python 3.12
 
 # 5. Pull dataset from HF Hub (instead of running the full pipeline).
 DATA_DIR="data/datasets/$DATASET"

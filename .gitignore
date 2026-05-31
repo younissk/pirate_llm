@@ -50,6 +50,13 @@ site/
 
 # ---- vast.ai state ----
 .vast_instance
+.vast_instance_*
+
+# ---- local Claude Code agent state ----
+.claude/
 
 # ---- llm-chess eval caches (regenerable; re-run the arena) ----
 evals/llm-chess/results/*_cache.jsonl
+
+# ONNX export artifacts for the mobile app (uploaded to HF, not source)
+export/
