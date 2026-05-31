@@ -99,10 +99,14 @@ def make_config_sft() -> Config:
         data_dir=DATA_DIR,  # for pirate_bpe.json (tokenizer + sha verify)
         run_dir="runs/frigate-125m-full-sft",
         hf_model_repo="younissk/nanoBeard-frigate-125M-full",
-        hf_ckpt_repo="younissk/frigate-125M-full-sft-ckpts",
+        # hf_ckpt_repo intentionally None: save_sft_checkpoint pushes a ~1.5GB
+        # ckpt synchronously inside the training loop on every val improvement,
+        # which on a slow/flaky uplink stalls the whole loop. SFT is short, so
+        # checkpoint locally only and upload the final sft_ckpt.pt once, out of
+        # band, to younissk/frigate-125M-full-sft-ckpts (public).
+        hf_ckpt_repo=None,
         # SFT loads the pretraining ckpt.pt from here (not the model repo).
         pretrained_ckpt_repo="younissk/frigate-125M-full-ckpts",
-        # Public ckpt repo — keeps the SFT weights off the limited private quota.
         hf_private=False,
         dropout=0.0,
         device="cuda",
